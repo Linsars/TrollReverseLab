@@ -90,7 +90,7 @@ public final class FridaEngine: ObservableObject {
     /// Enumerates system processes and filters to only TrollStore apps.
     /// Based on Material 3's listTrollProcesses() logic.
     public func listTrollProcesses() -> [LocalProcess] {
-        var targetPids: [LocalProcess] = []
+        let targetPids: [LocalProcess] = []
 
         // In production: use sysctl/proc_listallpids to enumerate processes
         // then filter by checking if the process bundle has .appInfo.plist marker
