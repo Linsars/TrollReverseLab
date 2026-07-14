@@ -48,5 +48,4 @@ targets:
     info:
       path: TrollReverseLab/Resources/Info.plist
     dependencies:
-      - framework: SQLite3.framework
-        embed: false
+      - sdk: sqlite3.tbd
