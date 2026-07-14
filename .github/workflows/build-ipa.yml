@@ -67,14 +67,22 @@ jobs:
 
       - name: Apply debug entitlements with ldid
         run: |
-          ENTITLEMENTS="TrollReverseLab/TrollReverseLab.entitlements"
+          ENTITLEMENTS="${{ github.workspace }}/TrollReverseLab/TrollReverseLab.entitlements"
+          BINARY="$APP_PATH/${{ env.APP_NAME }}"
+          
+          echo "Entitlements file: $ENTITLEMENTS"
+          echo "Binary path: $BINARY"
+          
+          # Verify files exist
+          ls -la "$ENTITLEMENTS"
+          ls -la "$BINARY"
           
           # Inject entitlements into the app binary
-          ldid -S"$ENTITLEMENTS" "$APP_PATH/${{ env.APP_NAME }}"
+          ldid -S"$ENTITLEMENTS" "$BINARY"
           
           # Verify applied entitlements
           echo "Applied entitlements:"
-          ldid -e "$APP_PATH/${{ env.APP_NAME }}"
+          ldid -e "$BINARY"
 
       - name: Package IPA
         run: |
