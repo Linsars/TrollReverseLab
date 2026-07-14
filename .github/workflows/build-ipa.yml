@@ -38,6 +38,7 @@ jobs:
 
       - name: Build app with xcodebuild
         run: |
+          set -o pipefail
           mkdir -p build
           xcodebuild \
             -project "${{ env.APP_NAME }}.xcodeproj" \
