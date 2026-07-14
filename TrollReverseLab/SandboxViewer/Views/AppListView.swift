@@ -215,22 +215,24 @@ struct PermissionErrorView: View {
                             .fontWeight(.semibold)
                             .foregroundColor(.secondary)
 
-                        DiagnosticRow(label: "扫描路径", value: "\(diag.pathsScanned.count) 个")
                         DiagnosticRow(label: "扫描目录数", value: "\(diag.totalDirsScanned)")
                         DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
                         DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
                         DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
-                        DiagnosticRow(label: "扫描耗时", value: String(format: "%.2fs", diag.scanDuration))
+                        DiagnosticRow(label: "扫描路径数", value: "\(diag.pathsScanned.count)")
+                        DiagnosticRow(label: "跳过容器", value: "\(diag.skippedContainers)")
 
-                        Text("扫描的路径:")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
+                        if !diag.markersChecked.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("检测标记:")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                Text(diag.markersChecked.joined(separator: ", "))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                             .padding(.top, 4)
-                        ForEach(diag.pathsScanned, id: \.self) { path in
-                            Text("• \(path)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
                         }
 
                         if !diag.errors.isEmpty {
@@ -302,7 +304,7 @@ struct EmptyStateWithDiagnosticsView: View {
                 Text("未找到 TrollStore 应用")
                     .font(.headline)
 
-                Text("扫描完成但未发现带 .appInfo.plist 标记的应用容器")
+                Text("扫描完成但未发现 TrollStore 标记\n标准 TrollStore 2.1.1 使用 _TrollStore / _TrollStoreLite（位于 /var/containers/Bundle/Application/），部分 ReMod 使用 .appInfo.plist（位于数据容器）。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -318,6 +320,21 @@ struct EmptyStateWithDiagnosticsView: View {
                         DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
                         DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
                         DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
+                        DiagnosticRow(label: "扫描路径数", value: "\(diag.pathsScanned.count)")
+                        DiagnosticRow(label: "跳过容器", value: "\(diag.skippedContainers)")
+
+                        if !diag.markersChecked.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("检测标记:")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                Text(diag.markersChecked.joined(separator: ", "))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     .padding()
                     .background(Color(.secondarySystemBackground))
@@ -345,7 +362,7 @@ struct EmptyStateWithDiagnosticsView: View {
                 }
                 .padding(.horizontal, 32)
 
-                Text("提示: 如果扫描目录数为 0 且沙盒可访问为「否」，说明 IPA 缺失 no-sandbox 权限。请在「权限自检」标签页检查并重新打包。")
+                Text("提示: 标准 TrollStore 2.1.1 在 /var/containers/Bundle/Application/ 下放置 _TrollStore 标记文件。如果 Marker 文件数为 0，请确认你安装的应用确实来自 TrollStore；如果沙盒可访问为「否」，请在「权限自检」标签页检查并重新打包。")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -389,7 +406,16 @@ struct DiagnosticsView: View {
                         DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
                         DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
                         DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
+                        DiagnosticRow(label: "跳过容器", value: "\(diag.skippedContainers)")
                         DiagnosticRow(label: "扫描耗时", value: String(format: "%.2fs", diag.scanDuration))
+                    }
+
+                    Section(header: Text("检测标记")) {
+                        ForEach(diag.markersChecked, id: \.self) { marker in
+                            Text(marker)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
 
                     Section(header: Text("扫描路径")) {

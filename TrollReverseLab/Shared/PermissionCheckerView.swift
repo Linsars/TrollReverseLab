@@ -173,7 +173,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("扫描路径")
                         Spacer()
-                        Text("/private/var/mobile/Containers/Data/Application/").foregroundColor(.secondary).font(.caption)
+                        Text("/var/containers/Bundle/Application/").foregroundColor(.secondary).font(.caption)
                     }
                     Text("TrollReverseLab 是一款 iOS 本地逆向学习工具，仅用于个人技术研究与学习。严禁用于内购绕过、支付欺诈、联机作弊及商业破解用途。")
                         .font(.caption)
