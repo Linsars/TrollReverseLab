@@ -94,6 +94,10 @@ jobs:
           echo "Entitlements file: $ENTITLEMENTS"
           echo "Binary path: $BINARY"
           
+          # Restore entitlements from git index (Xcode may have cleared the working copy)
+          echo "Restoring entitlements from git index..."
+          git checkout -- TrollReverseLab/TrollReverseLab.entitlements
+          
           # Verify files exist
           ls -la "$ENTITLEMENTS"
           ls -la "$BINARY"
