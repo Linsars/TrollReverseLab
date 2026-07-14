@@ -40,6 +40,9 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
+          # Xcode may overwrite the source entitlements file during build when
+          # CODE_SIGNING_ALLOWED=NO, so back it up first and restore it after.
+          cp TrollReverseLab/TrollReverseLab.entitlements build/TrollReverseLab.entitlements.backup
           xcodebuild \
             -project "${{ env.APP_NAME }}.xcodeproj" \
             -scheme "${{ env.SCHEME }}" \
@@ -51,6 +54,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
             build 2>&1 | tee build/xcodebuild.log
+          cp build/TrollReverseLab.entitlements.backup TrollReverseLab/TrollReverseLab.entitlements
 
       - name: Find built app bundle
         run: |
