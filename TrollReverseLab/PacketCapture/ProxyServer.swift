@@ -581,6 +581,8 @@ private final class ProxyConnection {
                     return
                 }
 
+                guard let self = self else { return }
+
                 // Record metadata capture
                 let captured = CapturedRequest(
                     method: "CONNECT",
@@ -600,7 +602,7 @@ private final class ProxyConnection {
                 self.onCapture(captured)
 
                 // Start tunneling
-                self?.startTunnel()
+                self.startTunnel()
             }
         )
     }
