@@ -14,7 +14,7 @@ env:
 jobs:
   build-ipa:
     name: Build IPA on macOS
-    runs-on: macos-14  # Apple Silicon (M1) macOS runner
+    runs-on: macos-15  # macOS 15 with Xcode 16.x (supports project format 77)
 
     steps:
       - name: Checkout repository
@@ -38,6 +38,7 @@ jobs:
 
       - name: Build app with xcodebuild
         run: |
+          mkdir -p build
           xcodebuild \
             -project "${{ env.APP_NAME }}.xcodeproj" \
             -scheme "${{ env.SCHEME }}" \
@@ -48,7 +49,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="TrollReverseLab/TrollReverseLab.entitlements" \
-            build | tee build/xcodebuild.log
+            build 2>&1 | tee build/xcodebuild.log
 
       - name: Find built app bundle
         run: |
