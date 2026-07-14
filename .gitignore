@@ -1,0 +1,21 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+*.swp
+
+# Build artifacts
+*.ipa
+*.app
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+*.orig

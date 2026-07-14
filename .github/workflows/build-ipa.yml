@@ -1,0 +1,129 @@
+name: Build TrollReverseLab IPA
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  workflow_dispatch:  # 允许手动触发构建
+
+env:
+  APP_NAME: TrollReverseLab
+  SCHEME: TrollReverseLab
+  CONFIGURATION: Release
+
+jobs:
+  build-ipa:
+    name: Build IPA on macOS
+    runs-on: macos-14  # Apple Silicon (M1) macOS runner
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          cd ${{ github.workspace }}
+          xcodegen generate
+          echo "Xcode project generated"
+
+      - name: Verify project structure
+        run: |
+          ls -la TrollReverseLab.xcodeproj/
+          echo "---"
+          find TrollReverseLab -name "*.swift" | head -20
+
+      - name: Build app with xcodebuild
+        run: |
+          xcodebuild \
+            -project "${{ env.APP_NAME }}.xcodeproj" \
+            -scheme "${{ env.SCHEME }}" \
+            -configuration "${{ env.CONFIGURATION }}" \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="TrollReverseLab/TrollReverseLab.entitlements" \
+            build | tee build/xcodebuild.log
+
+      - name: Find built app bundle
+        run: |
+          APP_PATH=$(find build/DerivedData -name "${{ env.APP_NAME }}.app" -path "*/Release-iphoneos/*" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Could not find built .app bundle"
+            exit 1
+          fi
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          echo "Found app at: $APP_PATH"
+
+      - name: Install ldid for entitlements signing
+        run: |
+          brew install ldid
+
+      - name: Apply debug entitlements with ldid
+        run: |
+          ENTITLEMENTS="TrollReverseLab/TrollReverseLab.entitlements"
+          
+          # Inject entitlements into the app binary
+          ldid -S"$ENTITLEMENTS" "$APP_PATH/${{ env.APP_NAME }}"
+          
+          # Verify applied entitlements
+          echo "Applied entitlements:"
+          ldid -e "$APP_PATH/${{ env.APP_NAME }}"
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          
+          cd build
+          rm -f "${{ env.APP_NAME }}.ipa"
+          zip -r "${{ env.APP_NAME }}.ipa" Payload/ -x "*.DS_Store"
+          cd ..
+          
+          IPA_PATH="build/${{ env.APP_NAME }}.ipa"
+          echo "IPA_PATH=$IPA_PATH" >> $GITHUB_ENV
+          
+          echo "IPA created at: $IPA_PATH"
+          ls -la "$IPA_PATH"
+
+      - name: Generate SHA256 checksum
+        run: |
+          shasum -a 256 "$IPA_PATH" > build/ipa_checksum.txt
+          cat build/ipa_checksum.txt
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollReverseLab-IPA
+          path: |
+            build/TrollReverseLab.ipa
+            build/ipa_checksum.txt
+          retention-days: 30
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build/xcodebuild.log
+          retention-days: 7
+
+      - name: Build summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **App**: TrollReverseLab" >> $GITHUB_STEP_SUMMARY
+          echo "- **Configuration**: Release" >> $GITHUB_STEP_SUMMARY
+          echo "- **SDK**: iphoneos (arm64)" >> $GITHUB_STEP_SUMMARY
+          echo "- **IPA size**: $(du -h "$IPA_PATH" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA256**: $(cat build/ipa_checksum.txt)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download the IPA artifact from this workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "2. Transfer to iOS device with TrollStore" >> $GITHUB_STEP_SUMMARY
+          echo "3. Open TrollStore and install the IPA" >> $GITHUB_STEP_SUMMARY
