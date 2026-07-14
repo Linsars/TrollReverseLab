@@ -11,6 +11,9 @@ env:
   SCHEME: TrollReverseLab
   CONFIGURATION: Release
 
+permissions:
+  contents: write
+
 jobs:
   build-ipa:
     name: Build IPA on macOS
