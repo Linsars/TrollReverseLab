@@ -42,7 +42,7 @@ public enum SandboxPermissionError: Error, LocalizedError {
 // MARK: - App Model
 
 /// Represents an installed TrollStore application discovered on the device.
-public struct TrollStoreApp: Identifiable, Hashable {
+public struct TrollStoreApp: Identifiable, Hashable, Codable {
     public let id: String
     public let bundleIdentifier: String
     public let displayName: String
@@ -53,6 +53,11 @@ public struct TrollStoreApp: Identifiable, Hashable {
     public let appSize: Int64
     public let isTrollStore: Bool
     public let markerType: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, bundleIdentifier, displayName, version, bundlePath, dataContainerPath
+        case installDate, appSize, isTrollStore, markerType
+    }
 
     /// Primary container path (data container, used for sandbox browsing)
     public var containerPath: String {
@@ -74,12 +79,16 @@ public struct TrollStoreApp: Identifiable, Hashable {
     public var tmpPath: String {
         (dataContainerPath as NSString).appendingPathComponent("tmp")
     }
+
+    public var iconPaths: [String] {
+        return AppIconLoader.iconPaths(forBundle: bundlePath)
+    }
 }
 
 // MARK: - Diagnostics
 
 /// Diagnostic info about the last scan — helps users troubleshoot.
-public struct ScanDiagnostics {
+public struct ScanDiagnostics: Codable {
     public var pathsScanned: [String] = []
     public var totalDirsScanned: Int = 0
     public var trollStoreApps: Int = 0
@@ -90,6 +99,8 @@ public struct ScanDiagnostics {
     public var scanDuration: TimeInterval = 0
     public var markersChecked: [String] = []
     public var skippedContainers: Int = 0
+
+    public init() {}
 }
 
 // MARK: - Permission Check Result
@@ -100,6 +111,115 @@ public struct PermissionCheckResult {
     public let isAccessible: Bool
     public let itemCount: Int
     public let error: String?
+}
+
+// MARK: - App Icon Loader
+
+/// Loads app icons from a .app bundle without relying on UIKit bundles.
+public enum AppIconLoader {
+    public static func iconPaths(forBundle bundlePath: String) -> [String] {
+        let infoPath = (bundlePath as NSString).appendingPathComponent("Info.plist")
+        guard let data = FileManager.default.contents(atPath: infoPath),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            return []
+        }
+
+        var candidates: [String] = []
+
+        // Primary: CFBundleIcons (iOS 5+)
+        if let icons = plist["CFBundleIcons"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let files = primary["CFBundleIconFiles"] as? [String] {
+            candidates.append(contentsOf: files)
+        }
+
+        // Fallback: CFBundleIconFiles
+        if let files = plist["CFBundleIconFiles"] as? [String] {
+            candidates.append(contentsOf: files)
+        }
+
+        // Fallback: CFBundleIconName
+        if let iconName = plist["CFBundleIconName"] as? String, !candidates.contains(iconName) {
+            candidates.append(iconName)
+        }
+
+        // Build full paths
+        var result: [String] = []
+        for name in candidates {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            // Try name, name@2x, name@3x
+            for suffix in ["", "@2x", "@3x"] {
+                let fileName = trimmed + suffix + ".png"
+                let fullPath = (bundlePath as NSString).appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: fullPath) {
+                    result.append(fullPath)
+                }
+            }
+            // Try as asset catalog name (AppIcon60x60@2x etc.)
+            let assetPath = (bundlePath as NSString).appendingPathComponent(trimmed + ".png")
+            if FileManager.default.fileExists(atPath: assetPath) && !result.contains(assetPath) {
+                result.append(assetPath)
+            }
+        }
+
+        return Array(result.prefix(3))
+    }
+
+    public static func loadUIImage(fromPath path: String) -> UIImage? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        // Use data-based decoding to avoid UIImage caching issues with sandbox paths
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        return UIImage(data: data, scale: UIScreen.main.scale)
+    }
+}
+
+// MARK: - Scan Cache
+
+/// Persistent cache for scanned TrollStore apps so the UI opens instantly.
+public final class TrollStoreAppCache {
+    public static let shared = TrollStoreAppCache()
+
+    private let fileManager = FileManager.default
+    private var cacheDirectory: String {
+        let docs = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
+            ?? NSTemporaryDirectory()
+        return (docs as NSString).appendingPathComponent("TrollReverseLab")
+    }
+
+    private var appsCachePath: String {
+        return (cacheDirectory as NSString).appendingPathComponent("scannedApps.json")
+    }
+
+    private var diagnosticsCachePath: String {
+        return (cacheDirectory as NSString).appendingPathComponent("scanDiagnostics.json")
+    }
+
+    private init() {
+        try? fileManager.createDirectory(atPath: cacheDirectory, withIntermediateDirectories: true)
+    }
+
+    public func loadCachedApps() -> [TrollStoreApp] {
+        guard let data = fileManager.contents(atPath: appsCachePath) else { return [] }
+        return (try? JSONDecoder().decode([TrollStoreApp].self, from: data)) ?? []
+    }
+
+    public func saveCachedApps(_ apps: [TrollStoreApp]) {
+        if let data = try? JSONEncoder().encode(apps) {
+            fileManager.createFile(atPath: appsCachePath, contents: data, attributes: nil)
+        }
+    }
+
+    public func loadCachedDiagnostics() -> ScanDiagnostics? {
+        guard let data = fileManager.contents(atPath: diagnosticsCachePath) else { return nil }
+        return try? JSONDecoder().decode(ScanDiagnostics.self, from: data)
+    }
+
+    public func saveCachedDiagnostics(_ diagnostics: ScanDiagnostics) {
+        if let data = try? JSONEncoder().encode(diagnostics) {
+            fileManager.createFile(atPath: diagnosticsCachePath, contents: data, attributes: nil)
+        }
+    }
 }
 
 // MARK: - Scanner
@@ -133,6 +253,18 @@ public final class TrollStoreAppScanner {
     public init() {}
 
     // MARK: - Public Scan API
+
+    /// Async scan that returns results on a background queue and calls completion on main.
+    public func scanTrollStoreAppsAsync(completion: @escaping ([TrollStoreApp], ScanDiagnostics) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let apps = self.scanTrollStoreApps()
+            let diag = self.diagnostics
+            DispatchQueue.main.async {
+                completion(apps, diag)
+            }
+        }
+    }
 
     /// Scans container directories for TrollStore-installed apps.
     public func scanTrollStoreApps() -> [TrollStoreApp] {
@@ -172,9 +304,15 @@ public final class TrollStoreAppScanner {
 
         diagnostics.scanDuration = CFAbsoluteTimeGetCurrent() - startTime
 
-        return results.sorted {
+        let sorted = results.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
+
+        // Persist immediately
+        TrollStoreAppCache.shared.saveCachedApps(sorted)
+        TrollStoreAppCache.shared.saveCachedDiagnostics(diagnostics)
+
+        return sorted
     }
 
     // MARK: - Bundle Container Scanning
@@ -198,26 +336,44 @@ public final class TrollStoreAppScanner {
 
         diagnostics.totalDirsScanned += allDirs.count
 
+        // Process in parallel for speed; results are protected by a lock.
+        let lock = NSLock()
+        let group = DispatchGroup()
+        let queue = DispatchQueue.global(qos: .userInitiated)
+
         for dir in allDirs {
-            let dirPath = dir.path
-            let marker = firstExistingMarker(in: dirPath, markers: trollStoreMarkers)
-            guard !marker.isEmpty else { continue }
+            group.enter()
+            queue.async { [weak self] in
+                defer { group.leave() }
+                guard let self = self else { return }
 
-            diagnostics.markerFilesFound += 1
+                let dirPath = dir.path
+                let marker = self.firstExistingMarker(in: dirPath, markers: self.trollStoreMarkers)
+                guard !marker.isEmpty else { return }
 
-            // Exclude TrollStore / TrollStoreLite own containers.
-            if isTrollStoreOwnContainer(dirPath) {
-                diagnostics.skippedContainers += 1
-                continue
-            }
+                lock.lock()
+                self.diagnostics.markerFilesFound += 1
+                lock.unlock()
 
-            if let app = parseBundleContainer(dir, marker: marker, dataContainerMap: dataContainerMap),
-               !seenBundleIDs.contains(app.bundleIdentifier) {
-                results.append(app)
-                seenBundleIDs.insert(app.bundleIdentifier)
-                diagnostics.trollStoreApps += 1
+                // Exclude TrollStore / TrollStoreLite own containers.
+                if self.isTrollStoreOwnContainer(dirPath) {
+                    lock.lock()
+                    self.diagnostics.skippedContainers += 1
+                    lock.unlock()
+                    return
+                }
+
+                if let app = self.parseBundleContainer(dir, marker: marker, dataContainerMap: dataContainerMap),
+                   !seenBundleIDs.contains(app.bundleIdentifier) {
+                    lock.lock()
+                    seenBundleIDs.insert(app.bundleIdentifier)
+                    results.append(app)
+                    self.diagnostics.trollStoreApps += 1
+                    lock.unlock()
+                }
             }
         }
+        group.wait()
     }
 
     // MARK: - Data Container (.appInfo.plist) Scanning
@@ -233,19 +389,34 @@ public final class TrollStoreAppScanner {
         }
         diagnostics.totalDirsScanned += allDirs.count
 
+        let lock = NSLock()
+        let group = DispatchGroup()
+        let queue = DispatchQueue.global(qos: .userInitiated)
+
         for dir in allDirs {
-            let appInfoPath = (dir.path as NSString).appendingPathComponent(appInfoMarker)
-            guard fileManager.fileExists(atPath: appInfoPath) else { continue }
+            group.enter()
+            queue.async { [weak self] in
+                defer { group.leave() }
+                guard let self = self else { return }
 
-            diagnostics.markerFilesFound += 1
+                let appInfoPath = (dir.path as NSString).appendingPathComponent(self.appInfoMarker)
+                guard self.fileManager.fileExists(atPath: appInfoPath) else { return }
 
-            if let app = parseAppInfoPlistContainer(dir),
-               !seenBundleIDs.contains(app.bundleIdentifier) {
-                results.append(app)
-                seenBundleIDs.insert(app.bundleIdentifier)
-                diagnostics.trollStoreApps += 1
+                lock.lock()
+                self.diagnostics.markerFilesFound += 1
+                lock.unlock()
+
+                if let app = self.parseAppInfoPlistContainer(dir),
+                   !seenBundleIDs.contains(app.bundleIdentifier) {
+                    lock.lock()
+                    seenBundleIDs.insert(app.bundleIdentifier)
+                    results.append(app)
+                    self.diagnostics.trollStoreApps += 1
+                    lock.unlock()
+                }
             }
         }
+        group.wait()
     }
 
     // MARK: - Data Container Map
@@ -304,7 +475,8 @@ public final class TrollStoreAppScanner {
         // Locate the matching data container.
         let dataContainerPath = dataContainerMap[bundleId] ?? ""
 
-        let appSize = calculateDirectorySize(at: appBundlePath)
+        // Calculate size on a background queue to keep scanning fast; default to 0 here.
+        let appSize: Int64 = 0
         let installDate = fileModificationDate(at: containerPath)
 
         return TrollStoreApp(
@@ -343,7 +515,7 @@ public final class TrollStoreAppScanner {
         // Try to find the matching bundle container by bundle ID.
         let bundlePath = findBundleContainer(forBundleId: bundleId)
 
-        let appSize = calculateDirectorySize(at: containerPath)
+        let appSize: Int64 = 0
         let installDate = fileModificationDate(at: containerPath)
 
         return TrollStoreApp(
@@ -358,6 +530,20 @@ public final class TrollStoreAppScanner {
             isTrollStore: true,
             markerType: appInfoMarker
         )
+    }
+
+    // MARK: - Async Size Calculation
+
+    /// Calculates the size of an installed app asynchronously.
+    public func calculateAppSizeAsync(for app: TrollStoreApp, completion: @escaping (Int64) -> Void) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            var total: Int64 = 0
+            for path in [app.bundlePath, app.dataContainerPath] where !path.isEmpty {
+                total += self.calculateDirectorySize(at: path)
+            }
+            DispatchQueue.main.async { completion(total) }
+        }
     }
 
     // MARK: - Permission Check (Module 4)

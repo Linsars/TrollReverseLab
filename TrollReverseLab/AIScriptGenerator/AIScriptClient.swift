@@ -70,10 +70,12 @@ public final class AIScriptClient: ObservableObject {
     /// - Parameter description: Natural language description of what to analyze
     /// - Parameter scriptType: Type of script to generate (Frida JS or Lua)
     /// - Parameter appContext: Context about the target app for better generation
+    /// - Parameter targetApp: Optional selected TrollStore app for app-specific scripts
     public func generateScript(
         description: String,
         scriptType: ScriptType,
-        appContext: String? = nil
+        appContext: String? = nil,
+        targetApp: TrollStoreApp? = nil
     ) async throws -> GeneratedScript {
 
         guard !config.apiKey.isEmpty else {
@@ -86,7 +88,8 @@ public final class AIScriptClient: ObservableObject {
         let userPrompt = buildUserPrompt(
             description: description,
             scriptType: scriptType,
-            appContext: appContext
+            appContext: appContext,
+            targetApp: targetApp
         )
 
         let userMessage = ChatMessage(role: "user", content: userPrompt)
@@ -162,7 +165,7 @@ public final class AIScriptClient: ObservableObject {
 
     // MARK: - Prompt Building
 
-    private func buildUserPrompt(description: String, scriptType: ScriptType, appContext: String?) -> String {
+    private func buildUserPrompt(description: String, scriptType: ScriptType, appContext: String?, targetApp: TrollStoreApp?) -> String {
         var prompt = """
         Please generate a \(scriptType.displayName) script for the following local reverse engineering research task:
 
@@ -170,7 +173,18 @@ public final class AIScriptClient: ObservableObject {
 
         """
         if let context = appContext {
-            prompt += "App context: \(context)\n\n"
+            prompt += "Additional context: \(context)\n\n"
+        }
+        if let app = targetApp {
+            prompt += """
+            Target TrollStore app:
+            - Display name: \(app.displayName)
+            - Bundle ID: \(app.bundleIdentifier)
+            - Version: \(app.version)
+            - Bundle path: \(app.bundlePath)
+            - Data container: \(app.dataContainerPath)
+
+            """
         }
         prompt += """
         Requirements:

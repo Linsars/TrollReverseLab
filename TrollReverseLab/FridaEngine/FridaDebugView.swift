@@ -16,15 +16,22 @@ import SwiftUI
 
 struct FridaDebugView: View {
     @EnvironmentObject var fridaEngine: FridaEngine
+    @EnvironmentObject var appScanner: AppScannerViewModel
     @State private var scriptInput = ""
     @State private var scriptName = ""
     @State private var showProcessPicker = false
     @State private var selectedProcess: LocalProcess?
     @State private var showScriptLibrary = false
+    @State private var showAppPicker = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // Target app status bar
+                TargetAppBar(targetApp: fridaEngine.selectedTargetApp)
+
+                Divider()
+
                 // Connection status bar
                 ConnectionStatusBar(state: fridaEngine.state)
 
@@ -63,6 +70,12 @@ struct FridaDebugView: View {
 
                     Menu {
                         Button {
+                            showAppPicker = true
+                        } label: {
+                            Label("选择目标应用", systemImage: "app.badge.checkmark")
+                        }
+
+                        Button {
                             showProcessPicker = true
                         } label: {
                             Label("选择应用进程", systemImage: "dot.radiowaves.left.and.right")
@@ -95,7 +108,50 @@ struct FridaDebugView: View {
             .sheet(isPresented: $showScriptLibrary) {
                 ScriptLibraryView(fridaEngine: fridaEngine)
             }
+            .sheet(isPresented: $showAppPicker) {
+                AppPickerView(
+                    apps: appScanner.apps,
+                    selectedApp: $fridaEngine.selectedTargetApp,
+                    isPresented: $showAppPicker
+                )
+            }
         }
+    }
+}
+
+/// Shows the currently selected target TrollStore app.
+struct TargetAppBar: View {
+    let targetApp: TrollStoreApp?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let app = targetApp {
+                AppIconView(bundlePath: app.bundlePath)
+                    .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text(app.bundleIdentifier)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                Image(systemName: "target")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                Text("未选择目标应用")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
     }
 }
 
@@ -427,6 +483,81 @@ struct SearchBar: UIViewRepresentable {
 
         func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
             text = searchText
+        }
+    }
+}
+
+/// Picker for selecting a TrollStore app as the Frida target.
+struct AppPickerView: View {
+    let apps: [TrollStoreApp]
+    @Binding var selectedApp: TrollStoreApp?
+    @Binding var isPresented: Bool
+    @State private var searchText = ""
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                SearchBar(text: $searchText)
+                    .padding(8)
+
+                if apps.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "app.badge")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("暂无 TrollStore 应用")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("请先在「沙盒浏览」标签页完成应用扫描")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filteredApps, id: \.id) { app in
+                        Button {
+                            selectedApp = app
+                            isPresented = false
+                        } label: {
+                            HStack(spacing: 12) {
+                                AppIconView(bundlePath: app.bundlePath)
+                                    .frame(width: 40, height: 40)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.displayName)
+                                        .font(.body)
+                                    Text(app.bundleIdentifier)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer()
+
+                                if selectedApp?.id == app.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("选择目标应用")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                leading: Button("取消") { isPresented = false }
+            )
+        }
+    }
+
+    private var filteredApps: [TrollStoreApp] {
+        if searchText.isEmpty { return apps }
+        return apps.filter {
+            $0.displayName.localizedCaseInsensitiveContains(searchText) ||
+            $0.bundleIdentifier.localizedCaseInsensitiveContains(searchText)
         }
     }
 }

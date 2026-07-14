@@ -66,6 +66,7 @@ public final class FridaEngine: ObservableObject {
     @Published public private(set) var loadedScripts: [DebugScript] = []
     @Published public private(set) var tracedFunctions: [FunctionTrace] = []
     @Published public private(set) var localScripts: [LocalScriptModel] = []
+    @Published public var selectedTargetApp: TrollStoreApp?
 
     private let securityFilter = AppSecurityFilter.shared
     private var currentProcess: LocalProcess?

@@ -11,9 +11,12 @@ import SwiftUI
 
 struct AIScriptView: View {
     @EnvironmentObject var aiClient: AIScriptClient
+    @EnvironmentObject var appScanner: AppScannerViewModel
     @State private var description = ""
     @State private var scriptType: ScriptType = .fridaJS
     @State private var appContext = ""
+    @State private var selectedApp: TrollStoreApp?
+    @State private var showAppPicker = false
     @State private var showFullResponse = false
     @State private var errorMessage: String?
 
@@ -29,6 +32,47 @@ struct AIScriptView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+
+                    // Target app selector
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("目标应用（可选）")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Button {
+                            showAppPicker = true
+                        } label: {
+                            HStack {
+                                if let app = selectedApp {
+                                    AppIconView(bundlePath: app.bundlePath)
+                                        .frame(width: 28, height: 28)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(app.displayName)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text(app.bundleIdentifier)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                } else {
+                                    Image(systemName: "app.badge")
+                                        .foregroundColor(.secondary)
+                                    Text("选择要分析的应用")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
 
                     // Natural language input
                     VStack(alignment: .leading, spacing: 4) {
@@ -129,6 +173,13 @@ struct AIScriptView: View {
             } label: {
                 Image(systemName: "arrow.counterclockwise")
             })
+            .sheet(isPresented: $showAppPicker) {
+                AppPickerView(
+                    apps: appScanner.apps,
+                    selectedApp: $selectedApp,
+                    isPresented: $showAppPicker
+                )
+            }
         }
     }
 
@@ -138,7 +189,8 @@ struct AIScriptView: View {
             _ = try await aiClient.generateScript(
                 description: description,
                 scriptType: scriptType,
-                appContext: appContext.isEmpty ? nil : appContext
+                appContext: appContext.isEmpty ? nil : appContext,
+                targetApp: selectedApp
             )
             description = ""
             appContext = ""

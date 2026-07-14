@@ -19,19 +19,29 @@ public final class AppScannerViewModel: ObservableObject {
     @Published public var permissionError: String?
 
     private let scanner = TrollStoreAppScanner()
+    private var hasLoadedCache = false
 
+    /// Loads cached apps immediately (called on first appear).
+    public func loadCache() {
+        guard !hasLoadedCache else { return }
+        hasLoadedCache = true
+        let cachedApps = TrollStoreAppCache.shared.loadCachedApps()
+        self.apps = cachedApps
+        self.diagnostics = TrollStoreAppCache.shared.loadCachedDiagnostics()
+    }
+
+    /// Starts an async scan without blocking the UI.
     public func scan() {
+        guard !isScanning else { return }
         isScanning = true
         permissionError = nil
-        DispatchQueue.global(qos: .userInitiated).async {
-            let found = self.scanner.scanTrollStoreApps()
-            let diag = self.scanner.diagnostics
-            DispatchQueue.main.async {
-                self.apps = found
-                self.diagnostics = diag
-                self.permissionError = diag.permissionError
-                self.isScanning = false
-            }
+
+        scanner.scanTrollStoreAppsAsync { [weak self] found, diag in
+            guard let self = self else { return }
+            self.apps = found
+            self.diagnostics = diag
+            self.permissionError = diag.permissionError
+            self.isScanning = false
         }
     }
 }
@@ -88,7 +98,8 @@ struct AppListView: View {
                 }
             )
             .onAppear {
-                if scanner.apps.isEmpty && !scanner.isScanning {
+                scanner.loadCache()
+                if !scanner.isScanning {
                     scanner.scan()
                 }
             }
@@ -132,17 +143,13 @@ struct AppListView: View {
 /// Row displaying app icon, name, version, and container size.
 struct AppRowView: View {
     let app: TrollStoreApp
+    @State private var rowImage: UIImage?
+    @State private var displayedSize: Int64 = 0
 
     var body: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.orange.opacity(0.15))
+            AppIconView(bundlePath: app.bundlePath)
                 .frame(width: 52, height: 52)
-                .overlay(
-                    Image(systemName: "app.badge.checkmark")
-                        .font(.title2)
-                        .foregroundColor(.orange)
-                )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(app.displayName)
@@ -154,8 +161,8 @@ struct AppRowView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    if app.appSize > 0 {
-                        Text(formatSize(app.appSize))
+                    if displayedSize > 0 {
+                        Text(formatSize(displayedSize))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -174,6 +181,14 @@ struct AppRowView: View {
             Spacer()
         }
         .padding(.vertical, 4)
+        .onAppear {
+            displayedSize = app.appSize
+            if displayedSize == 0 {
+                TrollStoreAppScanner().calculateAppSizeAsync(for: app) { size in
+                    displayedSize = size
+                }
+            }
+        }
     }
 
     private func formatSize(_ bytes: Int64) -> String {
@@ -181,6 +196,53 @@ struct AppRowView: View {
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+}
+
+/// Loads and displays the actual app icon from a .app bundle.
+struct AppIconView: View {
+    let bundlePath: String
+    @State private var iconImage: UIImage?
+
+    var body: some View {
+        Group {
+            if let iconImage = iconImage {
+                Image(uiImage: iconImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.orange.opacity(0.15))
+                    .overlay(
+                        Image(systemName: "app.badge.checkmark")
+                            .font(.title2)
+                            .foregroundColor(.orange)
+                    )
+            }
+        }
+        .onAppear {
+            loadIcon()
+        }
+        .onChange(of: bundlePath) { _ in
+            loadIcon()
+        }
+    }
+
+    private func loadIcon() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let paths = AppIconLoader.iconPaths(forBundle: bundlePath)
+            var image: UIImage?
+            for path in paths {
+                if let loaded = AppIconLoader.loadUIImage(fromPath: path) {
+                    image = loaded
+                    break
+                }
+            }
+            DispatchQueue.main.async {
+                self.iconImage = image
+            }
+        }
     }
 }
 

@@ -22,7 +22,7 @@ public enum SystemPrompt {
     1. Lua脚本：读取本地Plist/JSON存档、遍历目录、解析本地参数结构，仅用于研究存储格式；
     2. Frida JS脚本：追踪App本地函数调用、读取运行时本地变量，仅用于客户端运行逻辑学习；
 
-    所有脚本仅兼容带.appInfo.plist标记的TrollStore安装应用。
+    所有脚本仅兼容 TrollStore 安装应用（通过 _TrollStore / _TrollStoreLite / .appInfo.plist 标记识别）。
 
     严格约束 — 违规不可接受：
     1. 仅生成用于本地、离线研究的脚本，针对用户自选的TrollStore应用
