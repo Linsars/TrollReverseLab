@@ -106,7 +106,8 @@ struct AppListView: View {
                         dataContainerPath: path,
                         installDate: nil,
                         appSize: 0,
-                        isTrollStore: true
+                        isTrollStore: true,
+                        markerType: "manual"
                     )
                     scanner.selectedApp = manualApp
                 }
