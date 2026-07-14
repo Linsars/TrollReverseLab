@@ -2,9 +2,9 @@
 //  AppListView.swift
 //  TrollReverseLab
 //
-//  Module 1: Main view showing list of TrollStore applications.
-//  Scans for apps with .appInfo.plist markers and displays them
-//  for user selection.
+//  Module 1: Main view showing list of TrollStore-installed applications.
+//  Scans Data container directory, identifies TrollStore apps via .appInfo.plist,
+//  and displays them for user selection with diagnostic info.
 //
 
 import SwiftUI
@@ -14,15 +14,22 @@ public final class AppScannerViewModel: ObservableObject {
     @Published public var apps: [TrollStoreApp] = []
     @Published public var isScanning = false
     @Published public var selectedApp: TrollStoreApp?
+    @Published public var diagnostics: ScanDiagnostics?
+    @Published public var showDiagnostics = false
+    @Published public var permissionError: String?
 
     private let scanner = TrollStoreAppScanner()
 
     public func scan() {
         isScanning = true
+        permissionError = nil
         DispatchQueue.global(qos: .userInitiated).async {
             let found = self.scanner.scanTrollStoreApps()
+            let diag = self.scanner.diagnostics
             DispatchQueue.main.async {
                 self.apps = found
+                self.diagnostics = diag
+                self.permissionError = diag.permissionError
                 self.isScanning = false
             }
         }
@@ -32,43 +39,92 @@ public final class AppScannerViewModel: ObservableObject {
 /// List view showing all TrollStore applications on the device.
 struct AppListView: View {
     @EnvironmentObject var scanner: AppScannerViewModel
+    @State private var showManualPath = false
+    @State private var manualPath = ""
 
     var body: some View {
         NavigationView {
             Group {
                 if scanner.isScanning {
-                    ProgressView("扫描 TrollStore 应用...")
+                    VStack(spacing: 16) {
+                        ProgressView()
+                        Text("正在扫描 TrollStore 应用...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let permError = scanner.permissionError {
+                    // Permission error — IPA missing no-sandbox entitlement
+                    PermissionErrorView(
+                        error: permError,
+                        diagnostics: scanner.diagnostics,
+                        onRescan: { scanner.scan() },
+                        onManualPath: { showManualPath = true }
+                    )
                 } else if scanner.apps.isEmpty {
-                    EmptyStateView(
-                        icon: "tray",
-                        title: "未找到 TrollStore 应用",
-                        message: "请确认设备已通过 TrollStore 安装应用，然后点击右上角刷新"
+                    EmptyStateWithDiagnosticsView(
+                        diagnostics: scanner.diagnostics,
+                        onRescan: { scanner.scan() },
+                        onManualPath: { showManualPath = true }
                     )
                 } else {
-                    List(scanner.apps) { app in
-                        NavigationLink(destination: SandboxBrowserView(app: app)) {
-                            AppRowView(app: app)
-                        }
-                    }
-                    .listStyle(.insetGrouped)
+                    appListView
                 }
             }
             .navigationTitle("TrollStore 应用")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+            .navigationBarItems(
+                trailing: HStack {
+                    if !scanner.apps.isEmpty {
+                        Button {
+                            scanner.showDiagnostics = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                    }
                     Button {
                         scanner.scan()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-            }
+            )
             .onAppear {
-                if scanner.apps.isEmpty {
+                if scanner.apps.isEmpty && !scanner.isScanning {
                     scanner.scan()
                 }
             }
+            .sheet(isPresented: $scanner.showDiagnostics) {
+                DiagnosticsView(diagnostics: scanner.diagnostics)
+            }
+            .sheet(isPresented: $showManualPath) {
+                ManualPathView(path: $manualPath) { path in
+                    let manualApp = TrollStoreApp(
+                        id: "manual",
+                        bundleIdentifier: "manual",
+                        displayName: (path as NSString).lastPathComponent,
+                        version: "—",
+                        bundlePath: path,
+                        dataContainerPath: path,
+                        installDate: nil,
+                        appSize: 0,
+                        isTrollStore: true
+                    )
+                    scanner.selectedApp = manualApp
+                }
+            }
         }
+    }
+
+    private var appListView: some View {
+        List {
+            Section(header: Text("TrollStore 应用 (\(scanner.apps.count))")) {
+                ForEach(scanner.apps) { app in
+                    NavigationLink(destination: SandboxBrowserView(app: app)) {
+                        AppRowView(app: app)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 }
 
@@ -78,14 +134,13 @@ struct AppRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // App icon placeholder (TrollStore apps may not expose icon easily)
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.accentColor.opacity(0.15))
+                .fill(Color.orange.opacity(0.15))
                 .frame(width: 52, height: 52)
                 .overlay(
-                    Image(systemName: "app.fill")
+                    Image(systemName: "app.badge.checkmark")
                         .font(.title2)
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.orange)
                 )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -98,13 +153,15 @@ struct AppRowView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    Text(formatSize(app.appSize))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if app.appSize > 0 {
+                        Text(formatSize(app.appSize))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
 
-                    Image(systemName: "checkmark.seal.fill")
+                    Label("TrollStore", systemImage: "checkmark.seal.fill")
                         .font(.caption2)
-                        .foregroundColor(.green)
+                        .foregroundColor(.orange)
                 }
 
                 Text(app.bundleIdentifier)
@@ -123,6 +180,293 @@ struct AppRowView: View {
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+}
+
+/// Permission error view — shown when sandbox escape entitlement is missing.
+struct PermissionErrorView: View {
+    let error: String
+    let diagnostics: ScanDiagnostics?
+    let onRescan: () -> Void
+    let onManualPath: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(.red)
+
+                Text("沙盒权限缺失")
+                    .font(.headline)
+                    .foregroundColor(.red)
+
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+
+                // Diagnostic info
+                if let diag = diagnostics {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("诊断信息")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+
+                        DiagnosticRow(label: "扫描路径", value: "\(diag.pathsScanned.count) 个")
+                        DiagnosticRow(label: "扫描目录数", value: "\(diag.totalDirsScanned)")
+                        DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
+                        DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
+                        DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
+                        DiagnosticRow(label: "扫描耗时", value: String(format: "%.2fs", diag.scanDuration))
+
+                        Text("扫描的路径:")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                        ForEach(diag.pathsScanned, id: \.self) { path in
+                            Text("• \(path)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        if !diag.errors.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("错误信息:")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.red)
+                                ForEach(diag.errors, id: \.self) { err in
+                                    Text("• \(err)")
+                                        .font(.caption2)
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
+
+                VStack(spacing: 12) {
+                    Button(action: onRescan) {
+                        Label("重新扫描", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: onManualPath) {
+                        Label("手动输入路径", systemImage: "folder.badge.plus")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color(.tertiarySystemBackground))
+                            .cornerRadius(10)
+                    }
+                }
+                .padding(.horizontal, 32)
+
+                Text("提示: 请确认 IPA 已通过 TrollStore 安装，且 entitlements 包含 com.apple.private.security.no-sandbox 权限。可在「权限自检」标签页检查当前权限状态。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            .padding(.vertical, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Empty state with diagnostic info and manual path option.
+struct EmptyStateWithDiagnosticsView: View {
+    let diagnostics: ScanDiagnostics?
+    let onRescan: () -> Void
+    let onManualPath: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "tray")
+                    .font(.system(size: 48))
+                    .foregroundColor(.secondary)
+
+                Text("未找到 TrollStore 应用")
+                    .font(.headline)
+
+                Text("扫描完成但未发现带 .appInfo.plist 标记的应用容器")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if let diag = diagnostics {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("诊断信息")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+
+                        DiagnosticRow(label: "扫描目录数", value: "\(diag.totalDirsScanned)")
+                        DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
+                        DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
+                        DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
+
+                VStack(spacing: 12) {
+                    Button(action: onRescan) {
+                        Label("重新扫描", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: onManualPath) {
+                        Label("手动输入路径", systemImage: "folder.badge.plus")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color(.tertiarySystemBackground))
+                            .cornerRadius(10)
+                    }
+                }
+                .padding(.horizontal, 32)
+
+                Text("提示: 如果扫描目录数为 0 且沙盒可访问为「否」，说明 IPA 缺失 no-sandbox 权限。请在「权限自检」标签页检查并重新打包。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            .padding(.vertical, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct DiagnosticRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+        }
+    }
+}
+
+/// Diagnostics detail view (shown via info button).
+struct DiagnosticsView: View {
+    let diagnostics: ScanDiagnostics?
+    @Environment(\.presentationMode) var presentationMode
+
+    var body: some View {
+        NavigationView {
+            Form {
+                if let diag = diagnostics {
+                    Section(header: Text("统计")) {
+                        DiagnosticRow(label: "扫描路径数", value: "\(diag.pathsScanned.count)")
+                        DiagnosticRow(label: "扫描目录数", value: "\(diag.totalDirsScanned)")
+                        DiagnosticRow(label: "Marker 文件数", value: "\(diag.markerFilesFound)")
+                        DiagnosticRow(label: "TrollStore 应用", value: "\(diag.trollStoreApps)")
+                        DiagnosticRow(label: "沙盒可访问", value: diag.canAccessSandbox ? "是" : "否")
+                        DiagnosticRow(label: "扫描耗时", value: String(format: "%.2fs", diag.scanDuration))
+                    }
+
+                    Section(header: Text("扫描路径")) {
+                        ForEach(diag.pathsScanned, id: \.self) { path in
+                            Text(path)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    if !diag.errors.isEmpty {
+                        Section(header: Text("错误")) {
+                            ForEach(diag.errors, id: \.self) { error in
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                } else {
+                    Text("暂无诊断信息")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("扫描诊断")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                trailing: Button("完成") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+            )
+        }
+    }
+}
+
+/// Manual path entry view.
+struct ManualPathView: View {
+    @Binding var path: String
+    let onConfirm: (String) -> Void
+    @Environment(\.presentationMode) var presentationMode
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("手动输入路径"), footer: Text("输入应用数据容器的完整路径进行浏览")) {
+                    TextField("/private/var/mobile/Containers/Data/Application/...", text: $path)
+                        .keyboardType(.default)
+                        .autocapitalization(.none)
+                }
+
+                Section(header: Text("常用路径")) {
+                    Button("/private/var/mobile/Containers/Data/Application") {
+                        path = "/private/var/mobile/Containers/Data/Application"
+                    }
+                    Button("/var/mobile/Containers/Data/Application") {
+                        path = "/var/mobile/Containers/Data/Application"
+                    }
+                    Button("/var/containers/Bundle/Application") {
+                        path = "/var/containers/Bundle/Application"
+                    }
+                }
+            }
+            .navigationTitle("手动路径")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                leading: Button("取消") {
+                    presentationMode.wrappedValue.dismiss()
+                },
+                trailing: Button("浏览") {
+                    if !path.isEmpty {
+                        onConfirm(path)
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                .disabled(path.isEmpty)
+            )
+        }
     }
 }
 

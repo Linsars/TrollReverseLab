@@ -6,12 +6,39 @@
 //  Attaches ONLY to user-selected TrollStore app processes for local
 //  reverse code analysis, parameter reading, and runtime logic research.
 //
+//  INTEGRATED FROM: Material 3 — H5GG process enumeration & script management
+//  - listTrollProcesses(): enumerates TrollStore app processes only
+//  - LocalScriptModel: local Lua/Frida JS script storage
+//  - Script save/load for offline script library management
+//
 //  CONSTRAINT: No global process injection. No payment hooks. No online
 //  verification logic tampering. Only user-selected local app research.
 //
 
 import Foundation
 import SwiftUI
+
+// MARK: - Local Script Model (from Material 3)
+
+/// Local script model for Lua/Frida JS script storage.
+/// Bound to a specific TrollStore app container via targetAppUUID.
+public struct LocalScriptModel: Codable, Identifiable {
+    public var id: String
+    public var scriptName: String
+    public var scriptType: String // "lua" or "frida_js"
+    public var scriptContent: String
+    public var targetAppUUID: String // bound TrollStore app container
+    public var createdDate: Date
+
+    public init(id: String = UUID().uuidString, scriptName: String, scriptType: String, scriptContent: String, targetAppUUID: String, createdDate: Date = Date()) {
+        self.id = id
+        self.scriptName = scriptName
+        self.scriptType = scriptType
+        self.scriptContent = scriptContent
+        self.targetAppUUID = targetAppUUID
+        self.createdDate = createdDate
+    }
+}
 
 /// Represents a local process that can be attached for debugging.
 public struct LocalProcess: Identifiable, Hashable {
@@ -38,6 +65,7 @@ public final class FridaEngine: ObservableObject {
     @Published public private(set) var consoleOutput: [ConsoleMessage] = []
     @Published public private(set) var loadedScripts: [DebugScript] = []
     @Published public private(set) var tracedFunctions: [FunctionTrace] = []
+    @Published public private(set) var localScripts: [LocalScriptModel] = []
 
     private let securityFilter = AppSecurityFilter.shared
     private var currentProcess: LocalProcess?
@@ -45,17 +73,34 @@ public final class FridaEngine: ObservableObject {
 
     public init() {}
 
-    // MARK: - Process Management
+    // MARK: - Process Management (from Material 3)
 
     /// Lists local processes that can be attached.
-    /// Filters to only show TrollStore-installed applications.
+    /// Only returns TrollStore-installed application processes.
+    /// Frida-gadget attach constraint: only mounts isTrollStoreApp==true app processes.
     public func listAttachableProcesses() -> [LocalProcess] {
-        // In production, this calls Frida's device.enumerateProcesses()
-        // For now, we use a bridge to the frida-gadget runtime
-        guard let bridge = bridge else {
-            return []
+        // Enumerate TrollStore app processes via Frida bridge
+        guard let bridge = bridge, bridge.isConnected else {
+            return listTrollProcesses()
         }
         return bridge.enumerateProcesses()
+    }
+
+    /// Enumerates system processes and filters to only TrollStore apps.
+    /// Based on Material 3's listTrollProcesses() logic.
+    public func listTrollProcesses() -> [LocalProcess] {
+        var targetPids: [LocalProcess] = []
+
+        // In production: use sysctl/proc_listallpids to enumerate processes
+        // then filter by checking if the process bundle has .appInfo.plist marker
+        // For the scaffold, we return an empty list until frida-gadget is connected
+        //
+        // Production implementation:
+        //   let pids = proc_listallpids(nil, 0)
+        //   for each pid: get process path, check .appInfo.plist exists
+        //   if TrollStoreAppScanner.isTrollStoreApp(appContainerURL: url): include
+
+        return targetPids
     }
 
     /// Attaches to a user-selected local app process for debugging.
@@ -64,7 +109,6 @@ public final class FridaEngine: ObservableObject {
         // Security check: must be explicitly user-selected
         let validation = securityFilter.validateTarget(
             bundleIdentifier: process.bundleIdentifier ?? "",
-            containerPath: "", // Filled by the caller
             isUserSelected: isUserSelected
         )
 
@@ -143,10 +187,8 @@ public final class FridaEngine: ObservableObject {
     // MARK: - Function Tracing
 
     /// Traces function calls for the attached process.
-    /// Only traces locally selected functions for reverse code analysis.
     public func traceFunction(module: String, function: String) {
         let traceScript = """
-        // Local function trace for reverse code analysis
         var addr = Module.findExportByName('\(module)', '\(function)');
         if (addr) {
             Interceptor.attach(addr, {
@@ -164,6 +206,57 @@ public final class FridaEngine: ObservableObject {
         """
 
         executeScript(traceScript, name: "trace_\(function)")
+    }
+
+    // MARK: - Local Script Library (from Material 3)
+
+    /// Saves a script to the local script library.
+    public func saveScriptToLocal(name: String, content: String, type: String) {
+        let targetUUID = currentProcess?.bundleIdentifier ?? "general"
+        let script = LocalScriptModel(
+            scriptName: name,
+            scriptType: type,
+            scriptContent: content,
+            targetAppUUID: targetUUID
+        )
+        localScripts.append(script)
+        persistScript(script)
+        logInfo("Script saved: \(name)")
+    }
+
+    /// Loads all saved local scripts from disk.
+    public func loadLocalScripts() -> [LocalScriptModel] {
+        let scriptsDir = getScriptsDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: scriptsDir) else {
+            return localScripts
+        }
+
+        var loaded: [LocalScriptModel] = []
+        for file in files where file.hasSuffix(".json") {
+            let path = (scriptsDir as NSString).appendingPathComponent(file)
+            if let data = FileManager.default.contents(atPath: path),
+               let script = try? JSONDecoder().decode(LocalScriptModel.self, from: data) {
+                loaded.append(script)
+            }
+        }
+
+        localScripts = loaded
+        return loaded
+    }
+
+    private func persistScript(_ script: LocalScriptModel) {
+        let scriptsDir = getScriptsDirectory()
+        let path = (scriptsDir as NSString).appendingPathComponent("\(script.id).json")
+        if let data = try? JSONEncoder().encode(script) {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
+    private func getScriptsDirectory() -> String {
+        let docsDir = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+        let scriptsDir = (docsDir as NSString).appendingPathComponent("LocalScripts")
+        try? FileManager.default.createDirectory(atPath: scriptsDir, withIntermediateDirectories: true)
+        return scriptsDir
     }
 
     // MARK: - Console Output
@@ -188,7 +281,7 @@ public final class FridaEngine: ObservableObject {
 // MARK: - FridaBridge Delegate
 
 extension FridaEngine: FridaBridgeDelegate {
-    func bridge(_ bridge: FridaBridge, didReceiveMessage message: BridgeMessage) {
+    public func bridge(_ bridge: FridaBridge, didReceiveMessage message: BridgeMessage) {
         DispatchQueue.main.async {
             switch message.type {
             case .trace:

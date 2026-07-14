@@ -42,11 +42,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)/TrollReverseLab/Frameworks"
-        OTHER_LDFLAGS: "-ObjC"
+        OTHER_LDFLAGS: "-ObjC -lsqlite3"
     entitlements:
       path: TrollReverseLab/TrollReverseLab.entitlements
     info:
       path: TrollReverseLab/Resources/Info.plist
-    dependencies:
-      - framework: SQLite3.framework
-        embed: false

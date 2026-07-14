@@ -35,11 +35,9 @@ struct FileViewerSheet: View {
             }
             .navigationTitle(entry.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { presentationMode.wrappedValue.dismiss() }
-                }
-            }
+            .navigationBarItems(
+                trailing: Button("完成") { presentationMode.wrappedValue.dismiss() }
+            )
         }
     }
 }

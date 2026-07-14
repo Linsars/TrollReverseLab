@@ -5,6 +5,12 @@
 //  Main application entry point.
 //  iOS local reverse engineering learning tool for TrollStore environment.
 //
+//  Four modules:
+//  1. 沙盒文件浏览器 (Sandbox File Browser)
+//  2. 内置Frida本地调试 (Frida Local Debug)
+//  3. LLM逆向脚本生成 (AI Script Generation)
+//  4. 权限自检捕获 (Permission Self-Check)
+//
 
 import SwiftUI
 
@@ -21,7 +27,6 @@ struct TrollReverseLabApp: App {
                 .environmentObject(fridaEngine)
                 .environmentObject(aiClient)
                 .onAppear {
-                    // Display usage agreement on first launch
                     checkFirstLaunchAgreement()
                 }
         }
@@ -30,7 +35,6 @@ struct TrollReverseLabApp: App {
     private func checkFirstLaunchAgreement() {
         let defaults = UserDefaults.standard
         if !defaults.bool(forKey: "hasAcceptedUsageAgreement") {
-            // The MainTabView will present the agreement sheet
             defaults.set(false, forKey: "hasAcceptedUsageAgreement")
         }
     }
@@ -43,7 +47,7 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            // Module 1: Sandbox File Viewer
+            // Module 1: Sandbox File Browser
             AppListView()
                 .tabItem {
                     Label("沙盒浏览", systemImage: "folder.badge.person.crop")
@@ -64,10 +68,10 @@ struct MainTabView: View {
                 }
                 .tag(2)
 
-            // Settings
-            SettingsView()
+            // Module 4: Permission Self-Check
+            PermissionCheckerView()
                 .tabItem {
-                    Label("设置", systemImage: "gearshape")
+                    Label("权限自检", systemImage: "shield.checkered")
                 }
                 .tag(3)
         }
@@ -125,21 +129,14 @@ struct UsageAgreementView: View {
             }
             .navigationTitle("使用协议")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("拒绝") {
-                        // User declined agreement — keep the sheet open
-                        // They must agree before using the app
-                    }
-                    .disabled(true)
+            .navigationBarItems(
+                leading: Button("拒绝") { }
+                    .disabled(true),
+                trailing: Button("同意并继续") {
+                    UserDefaults.standard.set(true, forKey: "hasAcceptedUsageAgreement")
+                    isPresented = false
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("同意并继续") {
-                        UserDefaults.standard.set(true, forKey: "hasAcceptedUsageAgreement")
-                        isPresented = false
-                    }
-                }
-            }
+            )
         }
     }
 }

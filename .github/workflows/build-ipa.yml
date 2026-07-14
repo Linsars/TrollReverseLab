@@ -38,6 +38,7 @@ jobs:
 
       - name: Build app with xcodebuild
         run: |
+          set -o pipefail
           mkdir -p build
           xcodebuild \
             -project "${{ env.APP_NAME }}.xcodeproj" \
@@ -60,6 +61,22 @@ jobs:
           fi
           echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
           echo "Found app at: $APP_PATH"
+          
+          # List app bundle contents to find the binary
+          echo "App bundle contents:"
+          ls -la "$APP_PATH/"
+          
+          # Find the main binary inside the app bundle
+          # The binary is usually at the root of the .app bundle
+          APP_BINARY=$(find "$APP_PATH" -maxdepth 1 -type f -perm +111 ! -name "*.dylib" ! -name "*.framework" | head -1)
+          if [ -z "$APP_BINARY" ]; then
+            # Fallback: look for Mach-O binaries
+            APP_BINARY=$(find "$APP_PATH" -maxdepth 1 -type f | while read f; do
+              if file "$f" | grep -q "Mach-O"; then echo "$f"; break; fi
+            done)
+          fi
+          echo "APP_BINARY=$APP_BINARY" >> $GITHUB_ENV
+          echo "Found binary: $APP_BINARY"
 
       - name: Install ldid for entitlements signing
         run: |
@@ -68,7 +85,7 @@ jobs:
       - name: Apply debug entitlements with ldid
         run: |
           ENTITLEMENTS="${{ github.workspace }}/TrollReverseLab/TrollReverseLab.entitlements"
-          BINARY="$APP_PATH/${{ env.APP_NAME }}"
+          BINARY="$APP_BINARY"
           
           echo "Entitlements file: $ENTITLEMENTS"
           echo "Binary path: $BINARY"
@@ -76,6 +93,8 @@ jobs:
           # Verify files exist
           ls -la "$ENTITLEMENTS"
           ls -la "$BINARY"
+          
+          file "$BINARY"
           
           # Inject entitlements into the app binary
           ldid -S"$ENTITLEMENTS" "$BINARY"

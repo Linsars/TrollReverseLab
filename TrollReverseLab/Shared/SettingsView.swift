@@ -60,7 +60,10 @@ struct SettingsView: View {
                     HStack {
                         Text("Hex 最大显示字节")
                         Spacer()
-                        TextField("", value: $maxHexBytes, format: .number)
+                        TextField("", text: Binding(
+                            get: { String(maxHexBytes) },
+                            set: { maxHexBytes = Int($0) ?? 65536 }
+                        ))
                             .keyboardType(.numberPad)
                             .frame(width: 80)
                             .multilineTextAlignment(.trailing)

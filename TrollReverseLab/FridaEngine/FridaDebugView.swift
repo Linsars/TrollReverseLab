@@ -6,6 +6,11 @@
 //  Shows process attachment, script execution, console output,
 //  and function tracing for local reverse engineering research.
 //
+//  INTEGRATED FROM: Material 3 — H5GG process enumeration & script management
+//  - Process list UI with TrollStore app filtering
+//  - Local script library management (Lua/Frida JS)
+//  - iOS 14 compatibility fixes (.navigationBarItems instead of .toolbar)
+//
 
 import SwiftUI
 
@@ -15,6 +20,7 @@ struct FridaDebugView: View {
     @State private var scriptName = ""
     @State private var showProcessPicker = false
     @State private var selectedProcess: LocalProcess?
+    @State private var showScriptLibrary = false
 
     var body: some View {
         NavigationView {
@@ -36,12 +42,25 @@ struct FridaDebugView: View {
                     scriptName: $scriptName,
                     onExecute: {
                         fridaEngine.executeScript(scriptInput, name: scriptName.isEmpty ? "untitled" : scriptName)
+                    },
+                    onSave: {
+                        fridaEngine.saveScriptToLocal(
+                            name: scriptName.isEmpty ? "untitled" : scriptName,
+                            content: scriptInput,
+                            type: "frida_js"
+                        )
                     }
                 )
             }
             .navigationTitle("Frida 调试")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+            .navigationBarItems(
+                trailing: HStack {
+                    Button {
+                        showScriptLibrary = true
+                    } label: {
+                        Image(systemName: "books.vertical")
+                    }
+
                     Menu {
                         Button {
                             showProcessPicker = true
@@ -55,24 +74,26 @@ struct FridaDebugView: View {
                             Label("断开连接", systemImage: "xmark.circle")
                         }
 
-                        Divider()
-
                         Button {
                             fridaEngine.clearConsole()
                         } label: {
                             Label("清除控制台", systemImage: "trash")
+                                .foregroundColor(.red)
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
-            }
+            )
             .sheet(isPresented: $showProcessPicker) {
                 ProcessPickerView(
                     fridaEngine: fridaEngine,
                     selectedProcess: $selectedProcess,
                     isPresented: $showProcessPicker
                 )
+            }
+            .sheet(isPresented: $showScriptLibrary) {
+                ScriptLibraryView(fridaEngine: fridaEngine)
             }
         }
     }
@@ -187,11 +208,12 @@ struct ConsoleMessageView: View {
     }
 }
 
-/// Script input area with editor and execute button.
+/// Script input area with editor, execute and save buttons.
 struct ScriptInputArea: View {
     @Binding var scriptInput: String
     @Binding var scriptName: String
     let onExecute: () -> Void
+    let onSave: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -202,29 +224,35 @@ struct ScriptInputArea: View {
 
                 Spacer()
 
+                Button("保存") {
+                    onSave()
+                }
+                .buttonStyle(BorderlessButtonStyle())
+                .disabled(scriptInput.isEmpty)
+
                 Button("执行脚本") {
                     onExecute()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(DefaultButtonStyle())
                 .disabled(scriptInput.isEmpty)
             }
 
-            TextEditor(text: $scriptInput)
-                .font(.system(.caption, design: .monospaced))
-                .frame(height: 120)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(.separator), lineWidth: 0.5)
-                )
-                .overlay(alignment: .topLeading) {
-                    if scriptInput.isEmpty {
-                        Text("// 输入 Frida JS 脚本...\n// 例如: send(Process.id);")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(8)
-                            .allowsHitTesting(false)
-                    }
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $scriptInput)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(height: 120)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(.separator), lineWidth: 0.5)
+                    )
+                if scriptInput.isEmpty {
+                    Text("// 输入 Frida JS 脚本...\n// 例如: send(Process.id);")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .allowsHitTesting(false)
                 }
+            }
         }
         .padding(12)
         .background(Color(.secondarySystemBackground))
@@ -248,23 +276,40 @@ struct ProcessPickerView: View {
                     .padding(8)
 
                 // Process list
-                List(filteredProcesses, id: \.id) { process in
-                    Button {
-                        selectedProcess = process
-                        fridaEngine.attach(to: process, isUserSelected: true)
-                        isPresented = false
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(process.name)
-                                    .font(.body)
-                                Text("PID: \(process.pid)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                if processes.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "ladybug")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("暂无可附加进程")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("Frida-gadget 未运行或无可附加的 TrollStore 应用进程")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filteredProcesses, id: \.id) { process in
+                        Button {
+                            selectedProcess = process
+                            fridaEngine.attach(to: process, isUserSelected: true)
+                            isPresented = false
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(process.name)
+                                        .font(.body)
+                                    Text("PID: \(process.pid)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "link.badge.plus")
+                                    .foregroundColor(.accentColor)
                             }
-                            Spacer()
-                            Image(systemName: "link.badge.plus")
-                                .foregroundColor(.accentColor)
                         }
                     }
                 }
@@ -282,11 +327,9 @@ struct ProcessPickerView: View {
             }
             .navigationTitle("选择应用进程")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { isPresented = false }
-                }
-            }
+            .navigationBarItems(
+                leading: Button("取消") { isPresented = false }
+            )
             .onAppear {
                 processes = fridaEngine.listAttachableProcesses()
             }
@@ -300,6 +343,59 @@ struct ProcessPickerView: View {
         return processes.filter {
             $0.name.localizedCaseInsensitiveContains(searchText) ||
             ($0.bundleIdentifier?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
+}
+
+/// Local script library view — shows saved Lua/Frida JS scripts.
+struct ScriptLibraryView: View {
+    @ObservedObject var fridaEngine: FridaEngine
+    @Environment(\.presentationMode) var presentationMode
+    @State private var scripts: [LocalScriptModel] = []
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if scripts.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 40))
+                            .foregroundColor(.secondary)
+                        Text("暂无保存的脚本")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(scripts) { script in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(script.scriptName)
+                                .font(.body)
+                            HStack(spacing: 8) {
+                                Text(script.scriptType)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.15))
+                                    .cornerRadius(4)
+                                Text(script.targetAppUUID)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("本地脚本库")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                trailing: Button("完成") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+            )
+            .onAppear {
+                scripts = fridaEngine.loadLocalScripts()
+            }
         }
     }
 }

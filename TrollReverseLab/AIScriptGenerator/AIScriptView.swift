@@ -36,22 +36,22 @@ struct AIScriptView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        TextEditor(text: $description)
-                            .frame(height: 80)
-                            .font(.body)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color(.separator), lineWidth: 0.5)
-                            )
-                            .overlay(alignment: .topLeading) {
-                                if description.isEmpty {
-                                    Text("例如: 读取本地存档文件并解析其数据结构...")
-                                        .font(.body)
-                                        .foregroundColor(.secondary)
-                                        .padding(8)
-                                        .allowsHitTesting(false)
-                                }
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $description)
+                                .frame(height: 80)
+                                .font(.body)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(.separator), lineWidth: 0.5)
+                                )
+                            if description.isEmpty {
+                                Text("例如: 读取本地存档文件并解析其数据结构...")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .padding(8)
+                                    .allowsHitTesting(false)
                             }
+                        }
                     }
 
                     // App context (optional)
@@ -72,13 +72,12 @@ struct AIScriptView: View {
                         HStack {
                             if aiClient.isGenerating {
                                 ProgressView()
-                                    .tint(.white)
                             }
                             Text(aiClient.isGenerating ? "生成中..." : "生成脚本")
                         }
                         .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(DefaultButtonStyle())
                     .disabled(description.isEmpty || aiClient.isGenerating)
 
                     if let error = errorMessage {
@@ -125,15 +124,11 @@ struct AIScriptView: View {
                 }
             }
             .navigationTitle("AI 脚本生成")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        aiClient.resetConversation()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                    }
-                }
-            }
+            .navigationBarItems(trailing: Button {
+                aiClient.resetConversation()
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            })
         }
     }
 
@@ -188,7 +183,7 @@ struct ScriptDetailView: View {
                     .padding(12)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(8)
-                    .textSelection(.enabled)
+                    .modifier(SelectableTextModifier())
 
                 // Save button
                 Button {
@@ -198,16 +193,18 @@ struct ScriptDetailView: View {
                     Label("保存到本地", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(BorderlessButtonStyle())
             }
             .padding(16)
         }
         .navigationTitle("脚本详情")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("保存结果", isPresented: $showSavedAlert) {
-            Button("确定") {}
-        } message: {
-            Text(saveResult ? "脚本已保存到 Documents/GeneratedScripts/" : "保存失败，请重试")
+        .alert(isPresented: $showSavedAlert) {
+            Alert(
+                title: Text("保存结果"),
+                message: Text(saveResult ? "脚本已保存到 Documents/GeneratedScripts/" : "保存失败，请重试"),
+                dismissButton: .default(Text("确定"))
+            )
         }
     }
 }
@@ -215,7 +212,17 @@ struct ScriptDetailView: View {
 /// iOS 14-compatible date formatting helper.
 private func formatDate(_ date: Date) -> String {
     let formatter = DateFormatter()
-    formatter.dateStyle = .abbreviated
-    formatter.timeStyle = .short
+    formatter.dateFormat = "yy/MM/dd HH:mm"
     return formatter.string(from: date)
+}
+
+/// iOS 14-compatible text selection modifier.
+struct SelectableTextModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 15.0, *) {
+            content.textSelection(.enabled)
+        } else {
+            content
+        }
+    }
 }

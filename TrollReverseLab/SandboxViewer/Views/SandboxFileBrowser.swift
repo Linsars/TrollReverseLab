@@ -2,8 +2,8 @@
 //  SandboxFileBrowser.swift
 //  TrollReverseLab
 //
-//  Module 1: File browser for navigating TrollStore app sandbox directories.
-//  Supports Documents, Library, Library/Preferences, and tmp folders.
+//  Module 1: File browser for navigating app sandbox directories.
+//  Supports browsing both Bundle (.app) and Data container paths.
 //  Provides built-in viewers for JSON, Plist, SQLite, and Hex formats.
 //
 //  CONSTRAINT: Read-only browsing for local data format research.
@@ -77,6 +77,7 @@ public final class SandboxFileBrowser {
         var results: [SandboxFileEntry] = []
 
         for entry in entries {
+            // Skip hidden files starting with . (but keep them accessible via search)
             let fullPath = (path as NSString).appendingPathComponent(entry)
             let attrs = try? fileManager.attributesOfItem(atPath: fullPath)
 
@@ -127,7 +128,6 @@ public final class SandboxFileBrowser {
         case "png", "jpg", "jpeg", "gif", "bmp", "webp":
             return .image
         default:
-            // Check if it's a binary file
             return .unknown
         }
     }
@@ -147,6 +147,7 @@ public struct SandboxBrowserView: View {
     @State private var entries: [SandboxFileEntry] = []
     @State private var selectedEntry: SandboxFileEntry?
     @State private var navigationStack: [String] = []
+    @State private var showPathSelector = false
 
     private let browser = SandboxFileBrowser()
 
@@ -181,44 +182,68 @@ public struct SandboxBrowserView: View {
 
             Divider()
 
-            // Quick access buttons
-            HStack(spacing: 12) {
-                quickAccessButton("Documents", path: app.documentsPath)
-                quickAccessButton("Library", path: app.libraryPath)
-                quickAccessButton("Preferences", path: app.preferencesPath)
-                quickAccessButton("tmp", path: (app.containerPath as NSString).appendingPathComponent("tmp"))
+            // Quick access buttons - context-aware
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    // Bundle path quick access
+                    quickAccessButton("Bundle", icon: "app.badge", path: app.bundlePath, isCurrent: currentPath == app.bundlePath)
+
+                    // Data container quick access (if available)
+                    if !app.dataContainerPath.isEmpty {
+                        quickAccessButton("数据容器", icon: "internaldrive", path: app.dataContainerPath, isCurrent: currentPath == app.dataContainerPath)
+                        quickAccessButton("Documents", icon: "doc.on.folder", path: app.documentsPath, isCurrent: currentPath == app.documentsPath)
+                        quickAccessButton("Library", icon: "books.vertical", path: app.libraryPath, isCurrent: currentPath == app.libraryPath)
+                        quickAccessButton("Preferences", icon: "gearshape", path: app.preferencesPath, isCurrent: currentPath == app.preferencesPath)
+                        quickAccessButton("tmp", icon: "trash", path: app.tmpPath, isCurrent: currentPath == app.tmpPath)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
 
             Divider()
 
             // File list
-            List(entries) { entry in
-                Button {
-                    if entry.isDirectory {
-                        navigateTo(entry.path)
-                    } else {
-                        selectedEntry = entry
-                    }
-                } label: {
-                    FileRowView(entry: entry)
+            if entries.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary)
+                    Text("空目录或无法访问")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text(currentPath)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(entries) { entry in
+                    Button {
+                        if entry.isDirectory {
+                            navigateTo(entry.path)
+                        } else {
+                            selectedEntry = entry
+                        }
+                    } label: {
+                        FileRowView(entry: entry)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
         }
         .navigationTitle(app.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
+        .navigationBarItems(
+            trailing: Button {
+                refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
             }
-        }
+        )
         .sheet(item: $selectedEntry) { entry in
             FileViewerSheet(entry: entry)
         }
@@ -239,37 +264,45 @@ public struct SandboxBrowserView: View {
         refresh()
     }
 
-    private func navigateBack() {
-        if let previous = navigationStack.popLast() {
-            currentPath = previous
-            refresh()
-        }
-    }
-
-    private func quickAccessButton(_ title: String, path: String) -> some View {
+    private func quickAccessButton(_ title: String, icon: String, path: String, isCurrent: Bool) -> some View {
         Button {
             currentPath = path
             navigationStack = []
             refresh()
         } label: {
-            Label(title, systemImage: "folder.badge.gearshape")
+            Label(title, systemImage: icon)
                 .font(.caption)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.1))
+                .background(isCurrent ? Color.accentColor.opacity(0.2) : Color.accentColor.opacity(0.1))
                 .cornerRadius(8)
         }
     }
 
     private func breadcrumbItems() -> [(name: String, path: String)] {
         var items: [(name: String, path: String)] = []
-        let containerName = app.displayName
-        items.append((containerName, app.containerPath))
 
-        if currentPath != app.containerPath {
-            let relative = currentPath.replacingOccurrences(of: app.containerPath + "/", with: "")
+        // Determine root name and path
+        let rootName: String
+        let rootPath: String
+
+        if currentPath.hasPrefix(app.bundlePath) {
+            rootName = "Bundle"
+            rootPath = app.bundlePath
+        } else if !app.dataContainerPath.isEmpty && currentPath.hasPrefix(app.dataContainerPath) {
+            rootName = "数据容器"
+            rootPath = app.dataContainerPath
+        } else {
+            rootName = app.displayName
+            rootPath = app.containerPath
+        }
+
+        items.append((rootName, rootPath))
+
+        if currentPath != rootPath {
+            let relative = currentPath.replacingOccurrences(of: rootPath + "/", with: "")
             let components = relative.split(separator: "/")
-            var buildPath = app.containerPath
+            var buildPath = rootPath
             for component in components {
                 buildPath = (buildPath as NSString).appendingPathComponent(String(component))
                 items.append((String(component), buildPath))

@@ -41,15 +41,13 @@ public final class AppSecurityFilter {
 
     // MARK: - Public API
 
-    /// Validates whether a given app container is eligible for local research.
+    /// Validates whether a given app is eligible for local research.
     /// - Parameters:
     ///   - bundleIdentifier: The app's bundle ID
-    ///   - containerPath: The sandbox container path
     ///   - isUserSelected: Whether the user explicitly selected this app
     /// - Returns: Validation result with reason if denied
     public func validateTarget(
         bundleIdentifier: String,
-        containerPath: String,
         isUserSelected: Bool
     ) -> SecurityValidationResult {
 
@@ -66,17 +64,6 @@ public final class AppSecurityFilter {
         // Rule 3: Block Apple system apps by bundle prefix
         if bundleIdentifier.hasPrefix("com.apple.") {
             return .denied(reason: "Apple system applications are blocked. Only TrollStore-installed apps are eligible.")
-        }
-
-        // Rule 4: Verify container path is in the expected location
-        guard containerPath.contains("/var/mobile/Containers/Data/Application/") else {
-            return .denied(reason: "Container path is not in the standard application data directory.")
-        }
-
-        // Rule 5: Verify .appInfo.plist exists (TrollStore marker)
-        let appInfoPath = (containerPath as NSString).appendingPathComponent(".appInfo.plist")
-        guard FileManager.default.fileExists(atPath: appInfoPath) else {
-            return .denied(reason: "No .appInfo.plist found — this does not appear to be a TrollStore application.")
         }
 
         return .allowed
