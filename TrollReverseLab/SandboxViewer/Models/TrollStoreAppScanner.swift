@@ -283,12 +283,11 @@ public final class TrollStoreAppScanner {
         // 1. PRIMARY: Scan bundle containers for official TrollStore markers.
         for basePath in bundleContainerPaths {
             diagnostics.pathsScanned.append(basePath)
-            scanBundleContainers(
-                at: basePath,
-                dataContainerMap: dataContainerMap,
-                into: &results,
-                seenBundleIDs: &seenBundleIDs
-            )
+            let apps = scanBundleContainers(at: basePath, dataContainerMap: dataContainerMap)
+            for app in apps where !seenBundleIDs.contains(app.bundleIdentifier) {
+                results.append(app)
+                seenBundleIDs.insert(app.bundleIdentifier)
+            }
         }
 
         // 2. SECONDARY: Scan data containers for .appInfo.plist.
@@ -296,11 +295,11 @@ public final class TrollStoreAppScanner {
             if !diagnostics.pathsScanned.contains(basePath) {
                 diagnostics.pathsScanned.append(basePath)
             }
-            scanDataContainersForAppInfo(
-                at: basePath,
-                into: &results,
-                seenBundleIDs: &seenBundleIDs
-            )
+            let apps = scanDataContainersForAppInfo(at: basePath)
+            for app in apps where !seenBundleIDs.contains(app.bundleIdentifier) {
+                results.append(app)
+                seenBundleIDs.insert(app.bundleIdentifier)
+            }
         }
 
         diagnostics.scanDuration = CFAbsoluteTimeGetCurrent() - startTime
@@ -320,27 +319,26 @@ public final class TrollStoreAppScanner {
 
     private func scanBundleContainers(
         at basePath: String,
-        dataContainerMap: [String: String],
-        into results: inout [TrollStoreApp],
-        seenBundleIDs: inout Set<String>
-    ) {
+        dataContainerMap: [String: String]
+    ) -> [TrollStoreApp] {
         guard dirExistsAndAccessible(at: basePath) else {
             diagnostics.errors.append("无法访问 bundle 容器根目录: \(basePath)")
-            return
+            return []
         }
 
         guard let allDirs = enumerateSubdirectories(at: basePath) else {
             diagnostics.permissionError = SandboxPermissionError.noSandboxEscape(path: basePath).localizedDescription
             diagnostics.canAccessSandbox = false
-            return
+            return []
         }
 
         diagnostics.totalDirsScanned += allDirs.count
 
-        // Process in parallel for speed; results are protected by a lock.
+        // Process in parallel for speed; accumulate local results per task.
         let lock = NSLock()
         let group = DispatchGroup()
         let queue = DispatchQueue.global(qos: .userInitiated)
+        var results: [TrollStoreApp] = []
 
         for dir in allDirs {
             group.enter()
@@ -364,10 +362,8 @@ public final class TrollStoreAppScanner {
                     return
                 }
 
-                if let app = self.parseBundleContainer(dir, marker: marker, dataContainerMap: dataContainerMap),
-                   !seenBundleIDs.contains(app.bundleIdentifier) {
+                if let app = self.parseBundleContainer(dir, marker: marker, dataContainerMap: dataContainerMap) {
                     lock.lock()
-                    seenBundleIDs.insert(app.bundleIdentifier)
                     results.append(app)
                     self.diagnostics.trollStoreApps += 1
                     lock.unlock()
@@ -375,16 +371,15 @@ public final class TrollStoreAppScanner {
             }
         }
         group.wait()
+        return results
     }
 
     // MARK: - Data Container (.appInfo.plist) Scanning
 
     private func scanDataContainersForAppInfo(
-        at basePath: String,
-        into results: inout [TrollStoreApp],
-        seenBundleIDs: inout Set<String>
-    ) {
-        guard let allDirs = enumerateSubdirectories(at: basePath) else { return }
+        at basePath: String
+    ) -> [TrollStoreApp] {
+        guard let allDirs = enumerateSubdirectories(at: basePath) else { return [] }
         if !diagnostics.canAccessSandbox {
             diagnostics.canAccessSandbox = true
         }
@@ -393,6 +388,7 @@ public final class TrollStoreAppScanner {
         let lock = NSLock()
         let group = DispatchGroup()
         let queue = DispatchQueue.global(qos: .userInitiated)
+        var results: [TrollStoreApp] = []
 
         for dir in allDirs {
             group.enter()
@@ -407,10 +403,8 @@ public final class TrollStoreAppScanner {
                 self.diagnostics.markerFilesFound += 1
                 lock.unlock()
 
-                if let app = self.parseAppInfoPlistContainer(dir),
-                   !seenBundleIDs.contains(app.bundleIdentifier) {
+                if let app = self.parseAppInfoPlistContainer(dir) {
                     lock.lock()
-                    seenBundleIDs.insert(app.bundleIdentifier)
                     results.append(app)
                     self.diagnostics.trollStoreApps += 1
                     lock.unlock()
@@ -418,6 +412,7 @@ public final class TrollStoreAppScanner {
             }
         }
         group.wait()
+        return results
     }
 
     // MARK: - Data Container Map
@@ -536,12 +531,12 @@ public final class TrollStoreAppScanner {
     // MARK: - Async Size Calculation
 
     /// Calculates the size of an installed app asynchronously.
-    public func calculateAppSizeAsync(for app: TrollStoreApp, completion: @escaping (Int64) -> Void) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
+    public static func calculateAppSizeAsync(for app: TrollStoreApp, completion: @escaping (Int64) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let fileManager = FileManager.default
             var total: Int64 = 0
             for path in [app.bundlePath, app.dataContainerPath] where !path.isEmpty {
-                total += self.calculateDirectorySize(at: path)
+                total += calculateDirectorySize(at: path, fileManager: fileManager)
             }
             DispatchQueue.main.async { completion(total) }
         }
@@ -718,7 +713,7 @@ public final class TrollStoreAppScanner {
         return nil
     }
 
-    private func calculateDirectorySize(at path: String) -> Int64 {
+    private static func calculateDirectorySize(at path: String, fileManager: FileManager = FileManager.default) -> Int64 {
         guard let enumerator = fileManager.enumerator(atPath: path) else { return 0 }
         var totalSize: Int64 = 0
         while let element = enumerator.nextObject() as? String {

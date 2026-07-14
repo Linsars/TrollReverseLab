@@ -184,7 +184,7 @@ struct AppRowView: View {
         .onAppear {
             displayedSize = app.appSize
             if displayedSize == 0 {
-                TrollStoreAppScanner().calculateAppSizeAsync(for: app) { size in
+                TrollStoreAppScanner.calculateAppSizeAsync(for: app) { size in
                     displayedSize = size
                 }
             }
