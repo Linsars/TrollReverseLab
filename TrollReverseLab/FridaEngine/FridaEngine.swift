@@ -188,7 +188,7 @@ public final class FridaEngine: ObservableObject {
 // MARK: - FridaBridge Delegate
 
 extension FridaEngine: FridaBridgeDelegate {
-    func bridge(_ bridge: FridaBridge, didReceiveMessage message: BridgeMessage) {
+    public func bridge(_ bridge: FridaBridge, didReceiveMessage message: BridgeMessage) {
         DispatchQueue.main.async {
             switch message.type {
             case .trace:
