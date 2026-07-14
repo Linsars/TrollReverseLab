@@ -202,10 +202,16 @@ public final class TrollStoreAppScanner {
     }
 
     /// Checks whether the current process has the no-sandbox entitlement applied.
+    /// Uses contentsOfDirectory (not just fileExists) because the latter can return
+    /// true for paths the sandbox still blocks from listing.
     public func hasSandboxEscape() -> Bool {
-        // Try to access a path outside the normal sandbox
         let testPath = "/private/var/mobile/Containers/Data/Application/"
-        return fileManager.fileExists(atPath: testPath)
+        do {
+            _ = try fileManager.contentsOfDirectory(atPath: testPath)
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - App Parsing

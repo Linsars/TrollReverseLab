@@ -49,7 +49,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_ENTITLEMENTS="TrollReverseLab/TrollReverseLab.entitlements" \
+            CODE_SIGN_ENTITLEMENTS="" \
             build 2>&1 | tee build/xcodebuild.log
 
       - name: Find built app bundle
@@ -96,12 +96,32 @@ jobs:
           
           file "$BINARY"
           
-          # Inject entitlements into the app binary
+          # Strip any existing Apple code signature before applying ldid
+          # This is critical: TrollStore preserves the entitlements embedded by ldid,
+          # but an existing ad-hoc/Apple signature can interfere with the fake-root resign.
+          if command -v codesign &> /dev/null; then
+            echo "Removing existing code signature (if any)..."
+            codesign --remove-signature "$BINARY" 2>/dev/null || true
+          fi
+          
+          # Inject entitlements into the app binary using ldid
           ldid -S"$ENTITLEMENTS" "$BINARY"
           
           # Verify applied entitlements
           echo "Applied entitlements:"
           ldid -e "$BINARY"
+          
+          # Critical verification: ensure no-sandbox is actually present
+          echo "Checking for key entitlements..."
+          if ! ldid -e "$BINARY" | grep -q "com.apple.private.security.no-sandbox"; then
+            echo "❌ ERROR: com.apple.private.security.no-sandbox entitlement not found in signed binary!"
+            exit 1
+          fi
+          if ! ldid -e "$BINARY" | grep -q "com.apple.security.exception.files.absolute-path.read-write"; then
+            echo "❌ ERROR: absolute-path.read-write entitlement not found in signed binary!"
+            exit 1
+          fi
+          echo "✅ Key entitlements verified successfully."
 
       - name: Package IPA
         run: |
