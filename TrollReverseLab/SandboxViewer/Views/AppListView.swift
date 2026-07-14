@@ -263,16 +263,19 @@ struct EmptyStateWithDiagnosticsView: View {
                     Button(action: onRescan) {
                         Label("重新扫描", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
                     }
-                    .buttonStyle(BorderedButtonStyle())
 
                     Button(action: onManualPath) {
                         Label("手动输入路径", systemImage: "folder.badge.plus")
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
+                            .background(Color(.tertiarySystemBackground))
+                            .cornerRadius(10)
                     }
-                    .buttonStyle(BorderedButtonStyle())
                 }
                 .padding(.horizontal, 32)
 
