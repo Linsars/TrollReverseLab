@@ -177,6 +177,25 @@ jobs:
           path: build/xcodebuild.log
           retention-days: 7
 
+      - name: Create GitHub Release with IPA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(date +%Y%m%d%H%M%S)"
+          echo "Creating release with tag: $TAG"
+          gh release create "$TAG" "$IPA_PATH" \
+            --title "TrollReverseLab $TAG" \
+            --notes "## TrollReverseLab Build
+
+          - **Build time**: $(date -u '+%Y-%m-%d %H:%M UTC')
+          - **SHA256**: $(cat build/ipa_checksum.txt)
+
+          ### Installation
+          1. Download the IPA file below
+          2. Transfer to iOS device with TrollStore installed
+          3. Open TrollStore and install the IPA" \
+            --prerelease
+
       - name: Build summary
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
