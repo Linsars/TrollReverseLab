@@ -207,7 +207,7 @@ private final class ProxyConnection {
             guard let self = self else { return }
 
             if let error = error {
-                self.onLog?("Receive error: \(error.localizedDescription)")
+                self.onLog("Receive error: \(error.localizedDescription)")
                 self.finish()
                 return
             }

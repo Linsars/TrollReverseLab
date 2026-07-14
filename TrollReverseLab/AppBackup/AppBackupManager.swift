@@ -205,13 +205,15 @@ public final class AppBackupManager: ObservableObject {
                             totalSize += size
                         }
                     }
-                    try? fileManager.copyItem(atPath: sourcePath, toPath: destPath)
+                    try? fileManager.copyItem(atPath: sourcePath, to: destPath)
                     fileCount += 1
 
-                    // Update progress
-                    let progress = Double(fileCount) / Double(max(fileCount + enumerator.count, 1))
-                    DispatchQueue.main.async {
-                        self.status = .backingUp(progress: progress)
+                    // Update progress periodically
+                    if fileCount % 50 == 0 {
+                        let progress = min(Double(fileCount) / 1000.0, 0.95)
+                        DispatchQueue.main.async {
+                            self.status = .backingUp(progress: progress)
+                        }
                     }
                 }
             }
@@ -224,7 +226,7 @@ public final class AppBackupManager: ObservableObject {
 
     private func saveBackups() {
         if let data = try? JSONEncoder().encode(backups) {
-            try? data.write(toFile: backupsMetadataFile)
+            try? data.write(to: URL(fileURLWithPath: backupsMetadataFile))
         }
     }
 

@@ -176,7 +176,7 @@ public final class PacketCaptureEngine: ObservableObject {
     private func saveCaptures() {
         let limited = Array(capturedRequests.prefix(500)) // Keep last 500
         if let data = try? JSONEncoder().encode(limited) {
-            try? data.write(toFile: capturesFile)
+            try? data.write(to: URL(fileURLWithPath: capturesFile))
         }
     }
 
