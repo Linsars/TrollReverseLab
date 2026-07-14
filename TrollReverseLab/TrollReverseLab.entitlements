@@ -2,23 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- 应用标识 -->
     <key>application-identifier</key>
     <string>com.trollreverse.reverselab</string>
-
-    <!-- 平台应用标识（TrollStore 应用必须） -->
     <key>platform-application</key>
     <true/>
-
-    <!-- 沙盒逃逸：核心权限组合（TrollStore 推荐） -->
     <key>com.apple.private.security.no-sandbox</key>
     <true/>
     <key>com.apple.private.security.no-container</key>
     <true/>
     <key>com.apple.private.security.container-required</key>
     <false/>
-
-    <!-- 容器管理（访问 /var/mobile/Containers/ 必需） -->
     <key>com.apple.private.security.container-manager</key>
     <true/>
     <key>com.apple.private.MobileContainerManager.allowed</key>
@@ -27,14 +20,10 @@
     <true/>
     <key>com.apple.private.security.storage.file-read-write</key>
     <true/>
-
-    <!-- 绝对路径读写（Filza 成功案例关键） -->
     <key>com.apple.security.exception.files.absolute-path.read-write</key>
     <array>
         <string>/</string>
     </array>
-
-    <!-- 文件系统通用权限（WechatVideoReplacer 成功案例） -->
     <key>com.apple.security.files.all</key>
     <true/>
     <key>com.apple.security.files.root.read-only</key>
@@ -45,18 +34,12 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
-
-    <!-- App Groups 通配（容器访问辅助） -->
     <key>com.apple.security.application-groups</key>
     <array>
         <string>*</string>
     </array>
-
-    <!-- root helper / persona 管理（posix_spawn 用） -->
     <key>com.apple.private.persona-mgmt</key>
     <true/>
-
-    <!-- 调试与任务端口 -->
     <key>task_for_pid-allow</key>
     <true/>
     <key>get-task-allow</key>
@@ -65,8 +48,6 @@
     <true/>
     <key>com.apple.system-task-ports</key>
     <true/>
-
-    <!-- JIT / 内存 / 库验证 -->
     <key>com.apple.coremedia.jit</key>
     <true/>
     <key>com.apple.developer.kernel.increased-memory-limit</key>
@@ -83,8 +64,6 @@
     <true/>
     <key>com.apple.security.disable-library-validation</key>
     <true/>
-
-    <!-- SpringBoard / 网络 / TCC -->
     <key>com.apple.springboard.debugapplications</key>
     <true/>
     <key>com.apple.security.network.client</key>
@@ -93,8 +72,6 @@
     <array>
         <string>kTCCServiceSystemPolicyAllFiles</string>
     </array>
-
-    <!-- LS 数据库 -->
     <key>com.apple.private.coreservices.canmaplsdatabase</key>
     <true/>
 </dict>

@@ -94,6 +94,14 @@ jobs:
           ls -la "$ENTITLEMENTS"
           ls -la "$BINARY"
           
+          # Debug: show actual entitlements content and git state
+          echo "===== Entitlements content (first 50 lines) ====="
+          head -50 "$ENTITLEMENTS"
+          echo "===== Git status ====="
+          git status --short
+          echo "===== Git file size in index ====="
+          git ls-files -s TrollReverseLab/TrollReverseLab.entitlements
+          
           file "$BINARY"
           
           # Strip any existing Apple code signature before applying ldid
