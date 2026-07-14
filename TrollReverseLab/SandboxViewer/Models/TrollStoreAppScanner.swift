@@ -11,7 +11,6 @@
 //
 
 import Foundation
-import Security
 
 /// Represents an installed application discovered on the device.
 public struct TrollStoreApp: Identifiable, Hashable {
@@ -220,65 +219,39 @@ public final class TrollStoreAppScanner {
 
     /// Detects whether an app was installed via TrollStore by checking its entitlements.
     private func detectTrollStoreApp(at appPath: String, bundleId: String, infoPlist: [String: Any]) -> Bool {
-        // Method 1: Use Security framework to read entitlements (most reliable)
-        if let entitlements = readEntitlementsViaSecurityFramework(at: appPath) {
-            return checkTrollStoreEntitlements(entitlements)
-        }
-
-        // Method 2: Search binary for TrollStore-specific entitlement strings
+        // Method 1: Search binary for TrollStore-specific entitlement strings
         if let binaryPath = findMainBinary(at: appPath),
            let binaryData = fileManager.contents(atPath: binaryPath) {
-            return checkTrollStoreEntitlementsInBinary(binaryData)
+            if checkTrollStoreEntitlementsInBinary(binaryData) {
+                return true
+            }
         }
 
-        // Method 3: Check if app has get-task-allow in Info.plist (TrollStore sets this)
+        // Method 2: Check if app has get-task-allow in Info.plist (TrollStore sets this)
         if let getTaskAllow = infoPlist["get-task-allow"] as? Bool, getTaskAllow {
             return true
         }
 
-        return false
-    }
-
-    /// Reads entitlements using the Security framework (SecStaticCode).
-    private func readEntitlementsViaSecurityFramework(at appPath: String) -> [String: Any]? {
-        let url = URL(fileURLWithPath: appPath)
-        var staticCode: SecStaticCode?
-        let createResult = SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(rawValue: 0), &staticCode)
-        guard createResult == errSecSuccess, let code = staticCode else { return nil }
-
-        var signingInfo: CFDictionary?
-        let flags: SecCSFlags = [.requireEntitlements, .getSecurityInformation]
-        let copyResult = SecCodeCopySigningInformation(code, flags, &signingInfo)
-        guard copyResult == errSecSuccess, let info = signingInfo as? [String: Any] else { return nil }
-
-        // kSecCodeInfoEntitlementsDict may be present
-        if let entitlements = info["entitlements"] as? [String: Any] {
-            return entitlements
-        }
-        if let entitlements = info[kSecCodeInfoEntitlementsDict as String] as? [String: Any] {
-            return entitlements
-        }
-        return nil
-    }
-
-    /// Checks if the entitlements dict contains TrollStore-specific keys.
-    private func checkTrollStoreEntitlements(_ entitlements: [String: Any]) -> Bool {
-        let trollStoreKeys = [
-            "com.apple.private.security.no-sandbox",
-            "com.apple.private.security.container-required",
-            "com.apple.developer.kernel.increased-memory-limit",
-            "com.apple.security.cs.disable-library-validation",
-            "com.apple.security.cs.allow-dyld-environment-variables",
-            "com.apple.security.cs.allow-jit",
-            "com.apple.security.cs.disable-executable-page-protection",
-            "platform-application",
-            "com.apple.private.tcc.allow"
-        ]
-        for key in trollStoreKeys {
-            if entitlements[key] != nil {
-                return true
+        // Method 3: Check for _CodeSignature directory with entitlements file
+        let codeSigPath = (appPath as NSString).appendingPathComponent("_CodeSignature")
+        let entitlementsPath = (codeSigPath as NSString).appendingPathComponent("Entitlements.plist")
+        if fileManager.fileExists(atPath: entitlementsPath) {
+            if let data = fileManager.contents(atPath: entitlementsPath),
+               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
+                let trollStoreKeys = [
+                    "com.apple.private.security.no-sandbox",
+                    "platform-application",
+                    "com.apple.security.cs.disable-library-validation",
+                    "com.apple.developer.kernel.increased-memory-limit"
+                ]
+                for key in trollStoreKeys {
+                    if plist[key] != nil {
+                        return true
+                    }
+                }
             }
         }
+
         return false
     }
 
