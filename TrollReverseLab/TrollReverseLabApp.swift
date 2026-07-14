@@ -5,11 +5,13 @@
 //  Main application entry point.
 //  iOS local reverse engineering learning tool for TrollStore environment.
 //
-//  Four modules:
+//  Six modules:
 //  1. 沙盒文件浏览器 (Sandbox File Browser)
-//  2. 内置Frida本地调试 (Frida Local Debug)
-//  3. LLM逆向脚本生成 (AI Script Generation)
-//  4. 权限自检捕获 (Permission Self-Check)
+//  2. 网络抓包 (Packet Capture — HTTP/HTTPS proxy for AI analysis)
+//  3. 内置Frida本地调试 (Frida Local Debug)
+//  4. LLM逆向脚本生成 (AI Script Generation)
+//  5. 设置与权限自检 (Settings & Permission Self-Check)
+//  6. 应用数据备份/还原 (App Data Backup/Restore — integrated)
 //
 
 import SwiftUI
@@ -19,6 +21,8 @@ struct TrollReverseLabApp: App {
     @StateObject private var appScanner = AppScannerViewModel()
     @StateObject private var fridaEngine = FridaEngine()
     @StateObject private var aiClient = AIScriptClient()
+    @StateObject private var captureEngine = PacketCaptureEngine()
+    @StateObject private var backupManager = AppBackupManager()
 
     var body: some Scene {
         WindowGroup {
@@ -26,6 +30,8 @@ struct TrollReverseLabApp: App {
                 .environmentObject(appScanner)
                 .environmentObject(fridaEngine)
                 .environmentObject(aiClient)
+                .environmentObject(captureEngine)
+                .environmentObject(backupManager)
                 .onAppear {
                     checkFirstLaunchAgreement()
                 }
@@ -40,7 +46,7 @@ struct TrollReverseLabApp: App {
     }
 }
 
-/// Main tab navigation for the four core modules.
+/// Main tab navigation for the core modules.
 struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var showAgreement = false
@@ -54,26 +60,33 @@ struct MainTabView: View {
                 }
                 .tag(0)
 
-            // Module 2: Frida Debug Engine
+            // Module 2: Packet Capture
+            PacketCaptureView()
+                .tabItem {
+                    Label("抓包", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .tag(1)
+
+            // Module 3: Frida Debug Engine
             FridaDebugView()
                 .tabItem {
                     Label("Frida调试", systemImage: "ladybug")
                 }
-                .tag(1)
+                .tag(2)
 
-            // Module 3: AI Script Generator
+            // Module 4: AI Script Generator
             AIScriptView()
                 .tabItem {
                     Label("AI脚本", systemImage: "wand.and.stars")
                 }
-                .tag(2)
+                .tag(3)
 
-            // Module 4: Permission Self-Check
+            // Module 5: Settings & Permission Self-Check
             PermissionCheckerView()
                 .tabItem {
-                    Label("权限自检", systemImage: "shield.checkered")
+                    Label("设置", systemImage: "gearshape")
                 }
-                .tag(3)
+                .tag(4)
         }
         .sheet(isPresented: $showAgreement) {
             UsageAgreementView(isPresented: $showAgreement)

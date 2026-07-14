@@ -12,6 +12,8 @@ import SwiftUI
 struct AIScriptView: View {
     @EnvironmentObject var aiClient: AIScriptClient
     @EnvironmentObject var appScanner: AppScannerViewModel
+    @EnvironmentObject var captureEngine: PacketCaptureEngine
+    @EnvironmentObject var backupManager: AppBackupManager
     @State private var description = ""
     @State private var scriptType: ScriptType = .fridaJS
     @State private var appContext = ""
@@ -19,6 +21,9 @@ struct AIScriptView: View {
     @State private var showAppPicker = false
     @State private var showFullResponse = false
     @State private var errorMessage: String?
+    @State private var attachTraffic = false
+    @State private var trafficHostFilter = ""
+    @State private var showBackupView = false
 
     var body: some View {
         NavigationView {
@@ -72,6 +77,62 @@ struct AIScriptView: View {
                             .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
+                    }
+
+                    // Traffic context (if captures available)
+                    if captureEngine.hasCapturedData {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle(isOn: $attachTraffic) {
+                                HStack {
+                                    Image(systemName: "antenna.radiowaves.left.and.right")
+                                        .font(.caption)
+                                    Text("附加抓包数据 (\(captureEngine.captureCount) 条)")
+                                        .font(.caption)
+                                }
+                            }
+
+                            if attachTraffic {
+                                TextField("按主机过滤（可选，如 api.example.com）", text: $trafficHostFilter)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.caption)
+                                    .autocapitalization(.none)
+                            }
+                        }
+
+                        Divider()
+                    }
+
+                    // Auto-backup toggle (if app selected)
+                    if selectedApp != nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Image(systemName: "arrow.uturn.backward.circle")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                                Toggle(isOn: Binding(
+                                    get: { backupManager.autoBackupEnabled },
+                                    set: { backupManager.setAutoBackup($0) }
+                                )) {
+                                    Text("AI 操作前自动备份应用数据")
+                                        .font(.caption)
+                                }
+                            }
+
+                            NavigationLink(destination: AppBackupView()) {
+                                HStack {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption)
+                                    Text("管理备份 (\(backupManager.backups.count))")
+                                        .font(.caption)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        Divider()
                     }
 
                     // Natural language input
@@ -185,12 +246,26 @@ struct AIScriptView: View {
 
     private func generateScript() async {
         errorMessage = nil
+
+        // Auto-backup before AI operation
+        if let app = selectedApp {
+            backupManager.autoBackupIfNeeded(for: app)
+        }
+
+        // Build traffic context from captured data
+        let trafficContext: String? = attachTraffic
+            ? captureEngine.exportForAI(
+                hostFilter: trafficHostFilter.isEmpty ? nil : trafficHostFilter
+              )
+            : nil
+
         do {
             _ = try await aiClient.generateScript(
                 description: description,
                 scriptType: scriptType,
                 appContext: appContext.isEmpty ? nil : appContext,
-                targetApp: selectedApp
+                targetApp: selectedApp,
+                trafficContext: trafficContext
             )
             description = ""
             appContext = ""

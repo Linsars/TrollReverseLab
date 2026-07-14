@@ -71,11 +71,13 @@ public final class AIScriptClient: ObservableObject {
     /// - Parameter scriptType: Type of script to generate (Frida JS or Lua)
     /// - Parameter appContext: Context about the target app for better generation
     /// - Parameter targetApp: Optional selected TrollStore app for app-specific scripts
+    /// - Parameter trafficContext: Optional captured network traffic data for AI analysis
     public func generateScript(
         description: String,
         scriptType: ScriptType,
         appContext: String? = nil,
-        targetApp: TrollStoreApp? = nil
+        targetApp: TrollStoreApp? = nil,
+        trafficContext: String? = nil
     ) async throws -> GeneratedScript {
 
         guard !config.apiKey.isEmpty else {
@@ -89,7 +91,8 @@ public final class AIScriptClient: ObservableObject {
             description: description,
             scriptType: scriptType,
             appContext: appContext,
-            targetApp: targetApp
+            targetApp: targetApp,
+            trafficContext: trafficContext
         )
 
         let userMessage = ChatMessage(role: "user", content: userPrompt)
@@ -165,7 +168,7 @@ public final class AIScriptClient: ObservableObject {
 
     // MARK: - Prompt Building
 
-    private func buildUserPrompt(description: String, scriptType: ScriptType, appContext: String?, targetApp: TrollStoreApp?) -> String {
+    private func buildUserPrompt(description: String, scriptType: ScriptType, appContext: String?, targetApp: TrollStoreApp?, trafficContext: String?) -> String {
         var prompt = """
         Please generate a \(scriptType.displayName) script for the following local reverse engineering research task:
 
@@ -183,6 +186,16 @@ public final class AIScriptClient: ObservableObject {
             - Version: \(app.version)
             - Bundle path: \(app.bundlePath)
             - Data container: \(app.dataContainerPath)
+
+            """
+        }
+        if let traffic = trafficContext {
+            prompt += """
+            Captured network traffic (from local proxy capture):
+            \(traffic)
+
+            Use this traffic data to understand the app's API patterns, request formats, and data structures.
+            Focus on how the app stores and retrieves data locally based on the observed network behavior.
 
             """
         }

@@ -158,17 +158,38 @@ struct PermissionCheckerView: View {
                     }
                 }
 
+                // MARK: - App Data Backup
+                Section(header: Text("应用数据备份"), footer: Text("备份/还原应用数据，AI 操作前可自动备份")) {
+                    NavigationLink(destination: AppBackupView()) {
+                        HStack {
+                            Image(systemName: "doc.on.doc.fill")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("备份管理")
+                                Text("管理应用数据备份与还原")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // MARK: - About
                 Section(header: Text("关于")) {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("2.0.0").foregroundColor(.secondary)
+                        Text("3.0.0").foregroundColor(.secondary)
                     }
                     HStack {
                         Text("适用环境")
                         Spacer()
                         Text("纯 TrollStore（无越狱）").foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Text("功能模块")
+                        Spacer()
+                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 备份").foregroundColor(.secondary).font(.caption)
                     }
                     HStack {
                         Text("扫描路径")
@@ -180,7 +201,7 @@ struct PermissionCheckerView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .navigationTitle("权限自检")
+            .navigationTitle("设置")
             .onAppear {
                 if checkResults.isEmpty {
                     runCheck()
