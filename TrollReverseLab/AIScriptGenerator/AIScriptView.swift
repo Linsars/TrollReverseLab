@@ -125,14 +125,10 @@ struct AIScriptView: View {
                 }
             }
             .navigationTitle("AI 脚本生成")
-            .toolbar(content: {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        aiClient.resetConversation()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                    }
-                }
+            .navigationBarItems(trailing: Button {
+                aiClient.resetConversation()
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
             })
         }
     }
@@ -188,7 +184,7 @@ struct ScriptDetailView: View {
                     .padding(12)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(8)
-                    .textSelection(TextSelectionCompat.enabled)
+                    .modifier(SelectableTextModifier())
 
                 // Save button
                 Button {
@@ -221,26 +217,13 @@ private func formatDate(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
-/// iOS 14-compatible text selection wrapper.
-struct TextSelectionCompat {
-    static var enabled: some ViewModifier {
+/// iOS 14-compatible text selection modifier.
+struct SelectableTextModifier: ViewModifier {
+    func body(content: Content) -> some View {
         if #available(iOS 15.0, *) {
-            return TextSelectionEnabledModifier()
+            content.textSelection(.enabled)
         } else {
-            return EmptyViewModifier()
+            content
         }
-    }
-}
-
-@available(iOS 15.0, *)
-struct TextSelectionEnabledModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content.textSelection(.enabled)
-    }
-}
-
-struct EmptyViewModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
     }
 }
