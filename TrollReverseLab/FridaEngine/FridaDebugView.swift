@@ -205,26 +205,26 @@ struct ScriptInputArea: View {
                 Button("执行脚本") {
                     onExecute()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(DefaultButtonStyle())
                 .disabled(scriptInput.isEmpty)
             }
 
-            TextEditor(text: $scriptInput)
-                .font(.system(.caption, design: .monospaced))
-                .frame(height: 120)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(.separator), lineWidth: 0.5)
-                )
-                .overlay(alignment: .topLeading) {
-                    if scriptInput.isEmpty {
-                        Text("// 输入 Frida JS 脚本...\n// 例如: send(Process.id);")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(8)
-                            .allowsHitTesting(false)
-                    }
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $scriptInput)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(height: 120)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(.separator), lineWidth: 0.5)
+                    )
+                if scriptInput.isEmpty {
+                    Text("// 输入 Frida JS 脚本...\n// 例如: send(Process.id);")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .allowsHitTesting(false)
                 }
+            }
         }
         .padding(12)
         .background(Color(.secondarySystemBackground))
