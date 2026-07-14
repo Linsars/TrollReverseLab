@@ -72,7 +72,6 @@ struct AIScriptView: View {
                         HStack {
                             if aiClient.isGenerating {
                                 ProgressView()
-                                    .tint(.white)
                             }
                             Text(aiClient.isGenerating ? "生成中..." : "生成脚本")
                         }
