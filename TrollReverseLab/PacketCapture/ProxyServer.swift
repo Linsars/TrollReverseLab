@@ -181,7 +181,7 @@ private final class ProxyConnection {
         clientConnection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed(let error):
-                self?.onLog?("Client connection failed: \(error.localizedDescription)")
+                self?.onLog("Client connection failed: \(error.localizedDescription)")
                 self?.finish()
             case .cancelled:
                 self?.finish()
@@ -243,7 +243,7 @@ private final class ProxyConnection {
             if receiveBuffer.count < maxBufferSize {
                 readInitialData()
             } else {
-                onLog?("Buffer overflow, closing connection")
+                onLog("Buffer overflow, closing connection")
                 finish()
             }
             return
@@ -399,7 +399,7 @@ private final class ProxyConnection {
 
     private func forwardRequest() {
         guard !host.isEmpty else {
-            onLog?("No host to forward to")
+            onLog("No host to forward to")
             finish()
             return
         }
@@ -414,7 +414,7 @@ private final class ProxyConnection {
             case .ready:
                 self?.sendRequestToServer()
             case .failed(let error):
-                self?.onLog?("Server connection failed: \(error.localizedDescription)")
+                self?.onLog("Server connection failed: \(error.localizedDescription)")
                 self?.finish()
             case .cancelled:
                 self?.finish()
@@ -441,7 +441,7 @@ private final class ProxyConnection {
             content: requestData,
             completion: .contentProcessed { [weak self] error in
                 if let error = error {
-                    self?.onLog?("Send to server failed: \(error.localizedDescription)")
+                    self?.onLog("Send to server failed: \(error.localizedDescription)")
                     self?.finish()
                 } else {
                     self?.readResponseHeaders()
@@ -576,7 +576,7 @@ private final class ProxyConnection {
             content: Data(response.utf8),
             completion: .contentProcessed { [weak self] error in
                 if let error = error {
-                    self?.onLog?("CONNECT response send failed: \(error.localizedDescription)")
+                    self?.onLog("CONNECT response send failed: \(error.localizedDescription)")
                     self?.finish()
                     return
                 }

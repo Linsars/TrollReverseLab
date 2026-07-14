@@ -205,7 +205,7 @@ public final class AppBackupManager: ObservableObject {
                             totalSize += size
                         }
                     }
-                    try? fileManager.copyItem(atPath: sourcePath, to: destPath)
+                    try? fileManager.copyItem(atPath: sourcePath, toPath: destPath)
                     fileCount += 1
 
                     // Update progress periodically
