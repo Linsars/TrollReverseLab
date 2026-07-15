@@ -42,7 +42,7 @@ struct MoreView: View {
                 Image(systemName: "bolt.fill")
                     .font(.title2)
                     .foregroundColor(.accentColor)
-                Text("TrollReverseLab")
+                Text("TrollAIBio 逆向")
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
@@ -134,33 +134,22 @@ struct MoreView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(title: "系统", subtitle: "工作流、日志与设置")
 
-            VStack(spacing: 0) {
+            VStack(spacing: 12) {
                 NavigationLink(destination: WorkflowEditorView()) {
-                    ListToolRow(icon: "square.grid.2x2.fill", title: "工作流", subtitle: "可视化节点编辑器", color: Color(red: 0.0, green: 0.68, blue: 0.94))
+                    SystemCardRow(icon: "square.grid.2x2.fill", title: "工作流", subtitle: "可视化节点编辑器", color: Color(red: 0.0, green: 0.68, blue: 0.94))
                 }
                 .buttonStyle(PlainButtonStyle())
-
-                Divider()
-                    .padding(.leading, 56)
 
                 NavigationLink(destination: OperationLogView()) {
-                    ListToolRow(icon: "list.bullet.rectangle", title: "操作日志", subtitle: "操作历史与审计", color: Color(red: 0.50, green: 0.40, blue: 0.80))
+                    SystemCardRow(icon: "list.bullet.rectangle", title: "操作日志", subtitle: "操作历史与审计", color: Color(red: 0.50, green: 0.40, blue: 0.80))
                 }
                 .buttonStyle(PlainButtonStyle())
 
-                Divider()
-                    .padding(.leading, 56)
-
                 NavigationLink(destination: PermissionCheckerView()) {
-                    ListToolRow(icon: "gearshape.fill", title: "设置", subtitle: "权限检测与模型配置", color: .gray)
+                    SystemCardRow(icon: "gearshape.fill", title: "设置", subtitle: "权限检测与模型配置", color: .gray)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.systemBackground))
-                    .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
-            )
             .padding(.horizontal)
         }
     }
@@ -169,7 +158,7 @@ struct MoreView: View {
 
     private var aboutFooter: some View {
         VStack(spacing: 4) {
-            Text("TrollReverseLab v6.1.0")
+            Text("TrollAIBio 逆向 v6.1.1")
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text("适用于 TrollStore 环境 · iOS 14+")
@@ -236,12 +225,13 @@ private struct ToolCard: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
-// MARK: - List Tool Row
+// MARK: - System Card Row (independent background for reliable iOS 14 tap)
 
-private struct ListToolRow: View {
+private struct SystemCardRow: View {
     let icon: String
     let title: String
     let subtitle: String
@@ -260,6 +250,7 @@ private struct ListToolRow: View {
                 Text(title)
                     .font(.subheadline)
                     .fontWeight(.semibold)
+                    .foregroundColor(.primary)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -272,6 +263,12 @@ private struct ListToolRow: View {
                 .foregroundColor(.secondary)
         }
         .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

@@ -90,7 +90,7 @@ struct SettingsView: View {
                         Text("TrollStore").foregroundColor(.secondary)
                     }
 
-                    Text("TrollReverseLab 是一款 iOS 本地逆向学习工具，仅用于个人技术研究与学习。严禁用于内购绕过、支付欺诈、联机作弊及商业破解用途。")
+                    Text("TrollAIBio 逆向 是一款 iOS 本地逆向学习工具，仅用于个人技术研究与学习。严禁用于内购绕过、支付欺诈、联机作弊及商业破解用途。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

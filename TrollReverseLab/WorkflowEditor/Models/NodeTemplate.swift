@@ -107,7 +107,7 @@ struct NodeRegistry {
 
         NodeTemplate(id: "file.writePhotos", title: "保存到相册", category: .fileData,
                      iconSystemName: "photo.badge.plus",
-                     defaultParameters: ["album": "TrollReverseLab"],
+                     defaultParameters: ["album": "TrollAIBio 逆向"],
                      inputPortLabels: ["文件"], outputPortLabels: ["已完成"],
                      riskLevel: .low, description: "将文件保存到指定相册"),
 

@@ -463,7 +463,7 @@ class WorkflowEngine: ObservableObject {
     // MARK: - Export
 
     func exportAsScript() -> String {
-        var script = "// TrollReverseLab Workflow Script\n"
+        var script = "// TrollAIBio 逆向 Workflow Script\n"
         script += "// Generated from: \(lastUserInput)\n"
         script += "// Nodes: \(nodes.count), Connections: \(connections.count)\n\n"
 

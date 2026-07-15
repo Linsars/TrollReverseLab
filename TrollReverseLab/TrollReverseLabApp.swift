@@ -127,7 +127,7 @@ struct UsageAgreementView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text("TrollReverseLab 仅用于以下合法用途：")
+                    Text("TrollAIBio 逆向 仅用于以下合法用途：")
                         .font(.body)
 
                     VStack(alignment: .leading, spacing: 8) {

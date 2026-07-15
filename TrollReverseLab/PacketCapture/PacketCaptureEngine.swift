@@ -256,8 +256,8 @@ public final class PacketCaptureEngine: ObservableObject {
             "log": [
                 "version": "1.2",
                 "creator": [
-                    "name": "TrollReverseLab",
-                    "version": "5.0.0"
+                    "name": "TrollAIBio 逆向",
+                    "version": "6.1.1"
                 ],
                 "entries": entries
             ]

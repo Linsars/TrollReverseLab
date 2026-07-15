@@ -100,7 +100,7 @@ class OperationLogger: ObservableObject {
     }
 
     func exportAsText() -> String {
-        var output = "TrollReverseLab 操作日志\n"
+        var output = "TrollAIBio 逆向 操作日志\n"
         output += "导出时间: \(Date())\n"
         output += "记录数量: \(entries.count)\n"
         output += String(repeating: "=", count: 60) + "\n\n"
