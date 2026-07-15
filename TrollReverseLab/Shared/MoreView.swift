@@ -132,11 +132,19 @@ struct MoreView: View {
 
     private var systemSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "系统", subtitle: "工作流与设置")
+            sectionHeader(title: "系统", subtitle: "工作流、日志与设置")
 
             VStack(spacing: 0) {
                 NavigationLink(destination: WorkflowEditorView()) {
                     ListToolRow(icon: "square.grid.2x2.fill", title: "工作流", subtitle: "可视化节点编辑器", color: Color(red: 0.0, green: 0.68, blue: 0.94))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Divider()
+                    .padding(.leading, 56)
+
+                NavigationLink(destination: OperationLogView()) {
+                    ListToolRow(icon: "list.bullet.rectangle", title: "操作日志", subtitle: "操作历史与审计", color: Color(red: 0.50, green: 0.40, blue: 0.80))
                 }
                 .buttonStyle(PlainButtonStyle())
 
@@ -161,7 +169,7 @@ struct MoreView: View {
 
     private var aboutFooter: some View {
         VStack(spacing: 4) {
-            Text("TrollReverseLab v6.0.2")
+            Text("TrollReverseLab v6.1.0")
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text("适用于 TrollStore 环境 · iOS 14+")

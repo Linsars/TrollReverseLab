@@ -11,6 +11,11 @@ import SwiftUI
 /// Main packet capture view with start/stop, filtering, and request list.
 struct PacketCaptureView: View {
     @EnvironmentObject var captureEngine: PacketCaptureEngine
+    @EnvironmentObject var aiClient: AIScriptClient
+    @State private var showAIAnalysis = false
+    @State private var aiAnalysisResult = ""
+    @State private var isAnalyzing = false
+    @State private var analysisError: String?
 
     var body: some View {
         NavigationView {
@@ -22,8 +27,10 @@ struct PacketCaptureView: View {
                     onToggle: {
                         if captureEngine.isCapturing {
                             captureEngine.stopCapture()
+                            OperationLogger.shared.logInfo(module: "抓包", action: "停止抓包")
                         } else {
                             captureEngine.startCapture()
+                            OperationLogger.shared.logInfo(module: "抓包", action: "启动抓包", detail: "端口 \(captureEngine.proxyPort)")
                         }
                     }
                 )
@@ -65,10 +72,20 @@ struct PacketCaptureView: View {
                                 .foregroundColor(.red)
                         }
                     }
+                    if captureEngine.hasCapturedData {
+                        Button {
+                            analyzeTraffic()
+                        } label: {
+                            Image(systemName: isAnalyzing ? "sparkles" : "wand.and.stars")
+                                .foregroundColor(.accentColor)
+                        }
+                        .disabled(isAnalyzing)
+                    }
                     if !captureEngine.capturedRequests.isEmpty {
                         Menu {
                             Button {
                                 captureEngine.clearCaptures()
+                                OperationLogger.shared.logInfo(module: "抓包", action: "清除抓包数据")
                             } label: {
                                 Label("清除所有", systemImage: "trash")
                             }
@@ -76,6 +93,124 @@ struct PacketCaptureView: View {
                             Image(systemName: "ellipsis.circle")
                         }
                     }
+                }
+            )
+            .sheet(isPresented: $showAIAnalysis) {
+                AIAnalysisSheet(
+                    result: aiAnalysisResult,
+                    error: analysisError,
+                    isPresented: $showAIAnalysis
+                )
+            }
+        }
+    }
+
+    private func analyzeTraffic() {
+        guard !aiClient.config.apiKey.isEmpty else {
+            analysisError = "请先在设置中配置 AI API Key"
+            showAIAnalysis = true
+            return
+        }
+
+        isAnalyzing = true
+        analysisError = nil
+        aiAnalysisResult = ""
+
+        let trafficData = captureEngine.exportForAI(maxRequests: 30)
+
+        Task {
+            do {
+                let result = try await aiClient.analyzeTraffic(trafficData: trafficData)
+                await MainActor.run {
+                    self.aiAnalysisResult = result
+                    self.isAnalyzing = false
+                    self.showAIAnalysis = true
+                    OperationLogger.shared.logSuccess(module: "抓包", action: "AI流量分析", detail: "\(captureEngine.captureCount) 条请求")
+                }
+            } catch {
+                await MainActor.run {
+                    self.analysisError = error.localizedDescription
+                    self.isAnalyzing = false
+                    self.showAIAnalysis = true
+                    OperationLogger.shared.logFailure(module: "抓包", action: "AI流量分析", detail: error.localizedDescription)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - AI Analysis Sheet
+
+struct AIAnalysisSheet: View {
+    let result: String
+    let error: String?
+    @Binding var isPresented: Bool
+    @State private var copied = false
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                if let error = error {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.red)
+                        Text("分析失败")
+                            .font(.headline)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if result.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("AI 正在分析流量数据...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        Text(result)
+                            .font(.system(.subheadline))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .modifier(SelectableTextModifier())
+                    }
+
+                    Button {
+                        UIPasteboard.general.string = result
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            copied = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            Text(copied ? "已复制" : "复制分析结果")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundColor(.white)
+                        .background(Color.accentColor)
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(16)
+                }
+            }
+            .navigationTitle("AI 流量分析")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                trailing: Button {
+                    isPresented = false
+                } label: {
+                    Text("完成")
                 }
             )
         }

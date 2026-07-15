@@ -30,6 +30,7 @@ struct TrollReverseLabApp: App {
     @StateObject private var contentScheduler = ContentSchedulerManager()
     @StateObject private var scriptRecorder = ScriptRecorderManager()
     @StateObject private var sandboxLab = SandboxLabManager()
+    @StateObject private var conversationManager = AIConversationManager()
 
     var body: some Scene {
         WindowGroup {
@@ -46,6 +47,7 @@ struct TrollReverseLabApp: App {
                 .environmentObject(contentScheduler)
                 .environmentObject(scriptRecorder)
                 .environmentObject(sandboxLab)
+                .environmentObject(conversationManager)
                 .onAppear {
                     checkFirstLaunchAgreement()
                 }

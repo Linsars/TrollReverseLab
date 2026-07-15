@@ -15,6 +15,8 @@ struct AIScriptView: View {
     @EnvironmentObject var appScanner: AppScannerViewModel
     @EnvironmentObject var captureEngine: PacketCaptureEngine
     @EnvironmentObject var backupManager: AppBackupManager
+    @EnvironmentObject var conversationManager: AIConversationManager
+    @EnvironmentObject var fridaEngine: FridaEngine
     @State private var description = ""
     @State private var scriptType: ScriptType = .fridaJS
     @State private var appContext = ""
@@ -23,6 +25,9 @@ struct AIScriptView: View {
     @State private var errorMessage: String?
     @State private var attachTraffic = false
     @State private var trafficHostFilter = ""
+    @State private var showConversationHistory = false
+    @State private var showFridaInjectAlert = false
+    @State private var fridaInjectResult = ""
 
     // Custom colors (avoid iOS 15+ system colors)
     private let accentBlue = Color(red: 0.25, green: 0.47, blue: 0.90)
@@ -264,17 +269,28 @@ struct AIScriptView: View {
             }
             .navigationTitle("AI 脚本生成")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarItems(trailing: Button {
-                aiClient.resetConversation()
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-            })
+            .navigationBarItems(
+                leading: Button {
+                    showConversationHistory = true
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                },
+                trailing: Button {
+                    aiClient.resetConversation()
+                    OperationLogger.shared.logInfo(module: "AI脚本", action: "重置对话")
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+            )
             .sheet(isPresented: $showAppPicker) {
                 AppPickerView(
                     apps: appScanner.apps,
                     selectedApp: $selectedApp,
                     isPresented: $showAppPicker
                 )
+            }
+            .sheet(isPresented: $showConversationHistory) {
+                ConversationHistoryView(conversationManager: conversationManager)
             }
         }
     }
@@ -313,24 +329,51 @@ struct AIScriptView: View {
             backupManager.autoBackupIfNeeded(for: app)
         }
 
-        let trafficContext: String? = attachTraffic
+        // Auto-attach traffic if available and not explicitly toggled
+        let actualAttachTraffic = attachTraffic || (captureEngine.hasCapturedData && !attachTraffic && selectedApp != nil)
+        let trafficContext: String? = actualAttachTraffic
             ? captureEngine.exportForAI(
                 hostFilter: trafficHostFilter.isEmpty ? nil : trafficHostFilter
               )
             : nil
 
+        // Get or create conversation session
+        let session = conversationManager.getOrCreateSession(
+            forAppBundleId: selectedApp?.bundleIdentifier,
+            appName: selectedApp?.displayName ?? "通用",
+            scriptType: scriptType
+        )
+
         do {
-            _ = try await aiClient.generateScript(
+            _ = try await aiClient.generateScriptWithSession(
                 description: description,
                 scriptType: scriptType,
                 appContext: appContext.isEmpty ? nil : appContext,
                 targetApp: selectedApp,
-                trafficContext: trafficContext
+                trafficContext: trafficContext,
+                sessionMessages: session.messages
             )
+
+            // Save messages to session
+            let userMessage = ChatMessage(role: "user", content: description)
+            let assistantMessage = ChatMessage(role: "assistant", content: aiClient.generatedScripts.last?.fullResponse ?? "")
+            conversationManager.appendMessages(toSession: session.id, messages: [userMessage, assistantMessage])
+
+            OperationLogger.shared.logSuccess(
+                module: "AI脚本",
+                action: "生成\(scriptType.displayName)脚本",
+                detail: selectedApp?.displayName ?? "通用"
+            )
+
             description = ""
             appContext = ""
         } catch {
             errorMessage = error.localizedDescription
+            OperationLogger.shared.logFailure(
+                module: "AI脚本",
+                action: "生成脚本",
+                detail: error.localizedDescription
+            )
         }
     }
 }
@@ -399,9 +442,12 @@ private struct ScriptRow: View {
 struct ScriptDetailView: View {
     let script: GeneratedScript
     @EnvironmentObject var aiClient: AIScriptClient
+    @EnvironmentObject var fridaEngine: FridaEngine
     @State private var showSavedAlert = false
     @State private var saveResult = false
     @State private var copied = false
+    @State private var showInjectAlert = false
+    @State private var injectResult = ""
 
     var body: some View {
         ScrollView {
@@ -460,6 +506,23 @@ struct ScriptDetailView: View {
                         .modifier(SelectableTextModifier())
                 }
 
+                // Inject to Frida button
+                Button {
+                    injectToFreeze()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "ladybug.fill")
+                        Text("注入到 Frida 执行")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .foregroundColor(.white)
+                    .background(Color(red: 0.85, green: 0.45, blue: 0.20))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(PlainButtonStyle())
+
                 // Save button
                 Button {
                     saveResult = aiClient.saveScript(script)
@@ -489,6 +552,28 @@ struct ScriptDetailView: View {
                 dismissButton: .default(Text("确定"))
             )
         }
+        .alert(isPresented: $showInjectAlert) {
+            Alert(
+                title: Text("Frida 注入"),
+                message: Text(injectResult),
+                dismissButton: .default(Text("确定"))
+            )
+        }
+    }
+
+    private func injectToFreeze() {
+        if fridaEngine.state == .disconnected {
+            injectResult = "Frida 未连接，请先在 Frida 调试页面选择目标应用并连接。"
+            showInjectAlert = true
+            OperationLogger.shared.logFailure(module: "AI脚本", action: "注入Frida", detail: "Frida未连接")
+            return
+        }
+
+        let scriptName = script.description.prefix(20)
+        fridaEngine.executeScript(script.code, name: String(scriptName))
+        injectResult = "脚本已发送到 Frida 引擎，请查看 Frida 调试页面的控制台输出。"
+        showInjectAlert = true
+        OperationLogger.shared.logSuccess(module: "AI脚本", action: "注入Frida执行", detail: String(scriptName))
     }
 }
 
@@ -507,5 +592,118 @@ struct SelectableTextModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+// MARK: - Conversation History View
+
+struct ConversationHistoryView: View {
+    @ObservedObject var conversationManager: AIConversationManager
+    @Environment(\.presentationMode) var presentationMode
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                if conversationManager.sessions.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 36))
+                            .foregroundColor(.secondary)
+                        Text("暂无对话记录")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("生成脚本时会自动保存对话历史\n按应用分组，方便回溯")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(conversationManager.sessionsByApp, id: \.0) { appName, sessions in
+                            Section(header: Text(appName)) {
+                                ForEach(sessions) { session in
+                                    NavigationLink(destination: ConversationDetailView(session: session)) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(session.displayTitle)
+                                                .font(.subheadline)
+                                                .lineLimit(1)
+                                            HStack(spacing: 8) {
+                                                Text("\(session.messageCount) 条消息")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                                Text(session.scriptType == "frida-js" ? "Frida JS" : "Lua")
+                                                    .font(.caption2)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 1)
+                                                    .background(Color.accentColor.opacity(0.12))
+                                                    .foregroundColor(.accentColor)
+                                                    .cornerRadius(4)
+                                                Spacer()
+                                                Text(session.lastActivity)
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                                .onDelete { offsets in
+                                    for offset in offsets {
+                                        let session = sessions[offset]
+                                        conversationManager.deleteSession(session.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("对话历史")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                trailing: Button {
+                    presentationMode.wrappedValue.dismiss()
+                } label: {
+                    Text("完成")
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Conversation Detail View
+
+struct ConversationDetailView: View {
+    let session: AIConversationSession
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(session.messages.enumerated()), id: \.offset) { _, message in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: message.role == "user" ? "person.fill" : "sparkles")
+                                .font(.caption2)
+                                .foregroundColor(message.role == "user" ? .accentColor : .purple)
+                            Text(message.role == "user" ? "用户" : "AI")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .foregroundColor(message.role == "user" ? .accentColor : .purple)
+                        }
+                        Text(message.content)
+                            .font(.system(.caption))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground))
+                            .cornerRadius(8)
+                            .modifier(SelectableTextModifier())
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle(session.displayTitle)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

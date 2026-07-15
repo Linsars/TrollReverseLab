@@ -267,6 +267,103 @@ public final class AIScriptClient: ObservableObject {
         return try await callChatAPI(messages: messages)
     }
 
+    // MARK: - Script Generation with Session
+
+    /// Generates a script using a conversation session for context continuity.
+    /// The session's prior messages are used as conversation history.
+    public func generateScriptWithSession(
+        description: String,
+        scriptType: ScriptType,
+        appContext: String? = nil,
+        targetApp: TrollStoreApp? = nil,
+        trafficContext: String? = nil,
+        sessionMessages: [ChatMessage]
+    ) async throws -> GeneratedScript {
+
+        guard !config.apiKey.isEmpty else {
+            throw AIScriptError.missingAPIKey
+        }
+
+        isGenerating = true
+        defer { isGenerating = false }
+
+        let userPrompt = buildUserPrompt(
+            description: description,
+            scriptType: scriptType,
+            appContext: appContext,
+            targetApp: targetApp,
+            trafficContext: trafficContext
+        )
+
+        let userMessage = ChatMessage(role: "user", content: userPrompt)
+
+        // Build full message list: system prompt + session history + new user message
+        var fullMessages: [ChatMessage] = [
+            ChatMessage(role: "system", content: SystemPrompt.constraints)
+        ]
+        fullMessages.append(contentsOf: sessionMessages)
+        fullMessages.append(userMessage)
+
+        let response = try await callChatAPI(messages: fullMessages)
+
+        let script = extractCodeBlock(from: response) ?? response
+
+        let generated = GeneratedScript(
+            description: description,
+            scriptType: scriptType,
+            code: script,
+            fullResponse: response,
+            timestamp: Date()
+        )
+
+        await MainActor.run {
+            generatedScripts.append(generated)
+        }
+
+        return generated
+    }
+
+    // MARK: - Traffic Analysis
+
+    /// Analyzes captured network traffic using AI to identify API patterns,
+    /// request structures, and data formats.
+    public func analyzeTraffic(
+        trafficData: String,
+        targetApp: String? = nil
+    ) async throws -> String {
+
+        guard !config.apiKey.isEmpty else {
+            throw AIScriptError.missingAPIKey
+        }
+
+        let systemPrompt = """
+        你是一个 iOS 逆向工程分析助手。用户会提供从本地代理抓包获得的网络流量数据。
+        请分析这些流量数据，重点识别:
+        1. API 接口模式和 URL 路由结构
+        2. 请求参数格式 (JSON/FormData/Query)
+        3. 响应数据结构和字段含义
+        4. 认证方式 (Token/Cookie/Header)
+        5. 数据存储相关接口 (增删改查)
+
+        约束:
+        - 仅做技术分析，不涉及任何绕过、篡改建议
+        - 用中文回答
+        - 结构化输出，分点说明
+        """
+
+        var userPrompt = "以下是抓包获得的网络流量数据，请进行分析:\n\n\(trafficData)"
+        if let app = targetApp {
+            userPrompt = "目标应用: \(app)\n\n" + userPrompt
+        }
+
+        let messages: [ChatMessage] = [
+            ChatMessage(role: "system", content: systemPrompt),
+            ChatMessage(role: "user", content: userPrompt)
+        ]
+
+        return try await callChatAPI(messages: messages)
+    }
+
     // MARK: - Utilities
 
     /// Extracts code block from markdown-formatted LLM response.
