@@ -331,7 +331,7 @@ class WorkflowEngine: ObservableObject {
     private func extractJSON(from text: String) -> Data? {
         // Try direct parse
         if let data = text.data(using: .utf8),
-           JSONSerialization.jsonObject(with: data) != nil {
+           try? JSONSerialization.jsonObject(with: data) != nil {
             return data
         }
 
