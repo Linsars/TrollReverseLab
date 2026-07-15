@@ -212,6 +212,50 @@ public final class AIScriptClient: ObservableObject {
         return prompt
     }
 
+    // MARK: - Workflow Generation
+
+    /// Generates a visual workflow (node graph) from natural language.
+    /// Uses a dedicated system prompt that instructs the LLM to output JSON.
+    public func generateWorkflow(
+        userInput: String,
+        trafficContext: String? = nil,
+        targetAppName: String? = nil,
+        targetAppBundleId: String? = nil,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard !config.apiKey.isEmpty else {
+            completion(.failure(AIScriptError.missingAPIKey))
+            return
+        }
+
+        let systemPrompt = WorkflowPromptBuilder.systemPrompt()
+        let userPrompt = WorkflowPromptBuilder.userPrompt(
+            input: userInput,
+            trafficContext: trafficContext,
+            targetAppName: targetAppName,
+            targetAppBundleId: targetAppBundleId
+        )
+
+        let messages: [ChatMessage] = [
+            ChatMessage(role: "system", content: systemPrompt),
+            ChatMessage(role: "user", content: userPrompt)
+        ]
+
+        // Use a background task for the API call
+        Task {
+            do {
+                let response = try await callChatAPI(messages: messages)
+                await MainActor.run {
+                    completion(.success(response))
+                }
+            } catch {
+                await MainActor.run {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
     // MARK: - Utilities
 
     /// Extracts code block from markdown-formatted LLM response.

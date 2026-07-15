@@ -179,7 +179,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("3.0.0").foregroundColor(.secondary)
+                        Text("4.0.0").foregroundColor(.secondary)
                     }
                     HStack {
                         Text("适用环境")
@@ -189,7 +189,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("功能模块")
                         Spacer()
-                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 备份").foregroundColor(.secondary).font(.caption)
+                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 备份").foregroundColor(.secondary).font(.caption)
                     }
                     HStack {
                         Text("扫描路径")

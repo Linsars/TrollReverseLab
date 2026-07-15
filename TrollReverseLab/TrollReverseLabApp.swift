@@ -81,12 +81,21 @@ struct MainTabView: View {
                 }
                 .tag(3)
 
-            // Module 5: Settings & Permission Self-Check
+            // Module 5: Workflow Editor (Visual Node Canvas)
+            NavigationView {
+                WorkflowEditorView()
+            }
+            .tabItem {
+                Label("工作流", systemImage: "square.grid.2x2.fill")
+            }
+            .tag(4)
+
+            // Module 6: Settings & Permission Self-Check
             PermissionCheckerView()
                 .tabItem {
                     Label("设置", systemImage: "gearshape")
                 }
-                .tag(4)
+                .tag(5)
         }
         .sheet(isPresented: $showAgreement) {
             UsageAgreementView(isPresented: $showAgreement)
