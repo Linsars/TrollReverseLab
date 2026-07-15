@@ -8,6 +8,7 @@ on:
 
 env:
   APP_NAME: TrollReverseLab
+  APP_DISPLAY_NAME: TrollAIBio 逆向
   SCHEME: TrollReverseLab
   CONFIGURATION: Release
 
@@ -187,8 +188,8 @@ jobs:
           TAG="v$(date +%Y%m%d%H%M%S)"
           echo "Creating release with tag: $TAG"
           gh release create "$TAG" "$IPA_PATH" \
-            --title "TrollReverseLab $TAG" \
-            --notes "## TrollReverseLab Build
+            --title "${{ env.APP_DISPLAY_NAME }} $TAG" \
+            --notes "## ${{ env.APP_DISPLAY_NAME }} Build
 
           - **Build time**: $(date -u '+%Y-%m-%d %H:%M UTC')
           - **SHA256**: $(cat build/ipa_checksum.txt)
@@ -203,7 +204,7 @@ jobs:
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **App**: TrollReverseLab" >> $GITHUB_STEP_SUMMARY
+          echo "- **App**: ${{ env.APP_DISPLAY_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Configuration**: Release" >> $GITHUB_STEP_SUMMARY
           echo "- **SDK**: iphoneos (arm64)" >> $GITHUB_STEP_SUMMARY
           echo "- **IPA size**: $(du -h "$IPA_PATH" | cut -f1)" >> $GITHUB_STEP_SUMMARY
