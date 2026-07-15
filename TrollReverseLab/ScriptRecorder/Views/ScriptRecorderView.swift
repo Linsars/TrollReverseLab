@@ -46,7 +46,7 @@ struct ScriptRecorderView: View {
                             .font(.caption)
                     }
                     ForEach(manager.scripts) { script in
-                        NavigationLink(destination: ScriptDetailView(script: script)) {
+                        NavigationLink(destination: RecordedScriptDetailView(script: script)) {
                             ScriptRowView(script: script)
                         }
                     }
@@ -166,7 +166,7 @@ struct CreateScriptView: View {
 
 // MARK: - Script Detail View
 
-struct ScriptDetailView: View {
+struct RecordedScriptDetailView: View {
     @EnvironmentObject var manager: ScriptRecorderManager
     @State var script: ScriptRecord
     @State private var showAddAction = false
