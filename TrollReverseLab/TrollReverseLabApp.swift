@@ -23,6 +23,9 @@ struct TrollReverseLabApp: App {
     @StateObject private var aiClient = AIScriptClient()
     @StateObject private var captureEngine = PacketCaptureEngine()
     @StateObject private var backupManager = AppBackupManager()
+    @StateObject private var coordinateManager = CoordinatePickerManager()
+    @StateObject private var statusManager = DeviceStatusManager()
+    @StateObject private var ipaBuilder = IPABuilderManager()
 
     var body: some Scene {
         WindowGroup {
@@ -32,6 +35,9 @@ struct TrollReverseLabApp: App {
                 .environmentObject(aiClient)
                 .environmentObject(captureEngine)
                 .environmentObject(backupManager)
+                .environmentObject(coordinateManager)
+                .environmentObject(statusManager)
+                .environmentObject(ipaBuilder)
                 .onAppear {
                     checkFirstLaunchAgreement()
                 }

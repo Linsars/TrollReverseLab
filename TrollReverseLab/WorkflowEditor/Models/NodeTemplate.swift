@@ -184,6 +184,74 @@ struct NodeRegistry {
                      defaultParameters: ["pid": "", "name": ""],
                      inputPortLabels: ["触发"], outputPortLabels: ["已附加"],
                      riskLevel: .high, description: "附加到目标进程进行调试"),
+
+        // === New: Coordinate Picker Integration ===
+        NodeTemplate(id: "coord.tap", title: "坐标点位点击", category: .appControl,
+                     iconSystemName: "scope",
+                     defaultParameters: ["bundleId": "", "label": "", "tolerance": "15"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已完成"],
+                     riskLevel: .none, description: "使用坐标拾取器保存的点位执行点击，支持±N像素容错"),
+
+        NodeTemplate(id: "coord.swipe", title: "坐标点位滑动", category: .appControl,
+                     iconSystemName: "arrow.up.and.down",
+                     defaultParameters: ["bundleId": "", "label": "", "tolerance": "15"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已完成"],
+                     riskLevel: .none, description: "使用坐标拾取器保存的滑动点位执行滑动"),
+
+        NodeTemplate(id: "coord.input", title: "坐标点位输入", category: .appControl,
+                     iconSystemName: "keyboard",
+                     defaultParameters: ["bundleId": "", "label": "", "text": ""],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已完成"],
+                     riskLevel: .none, description: "在坐标拾取器保存的输入框位置输入文本"),
+
+        NodeTemplate(id: "coord.wait", title: "坐标点位等待", category: .appControl,
+                     iconSystemName: "clock.badge.checkmark",
+                     defaultParameters: ["bundleId": "", "label": "", "timeout": "10"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已加载"],
+                     riskLevel: .none, description: "等待坐标点位区域内容加载完成"),
+
+        // === New: Timer & System ===
+        NodeTemplate(id: "sys.timer", title: "定时触发", category: .aiLogic,
+                     iconSystemName: "timer",
+                     defaultParameters: ["delay": "5", "repeat": "false"],
+                     inputPortLabels: ["启动"], outputPortLabels: ["触发"],
+                     riskLevel: .none, description: "延迟指定秒数后触发，可循环"),
+
+        NodeTemplate(id: "sys.notification", title: "发送通知", category: .aiLogic,
+                     iconSystemName: "bell.badge",
+                     defaultParameters: ["title": "工作流通知", "body": ""],
+                     inputPortLabels: ["输入"], outputPortLabels: ["已完成"],
+                     riskLevel: .none, description: "发送本地通知提醒用户"),
+
+        NodeTemplate(id: "sys.clipboard", title: "读写剪贴板", category: .fileData,
+                     iconSystemName: "doc.on.clipboard",
+                     defaultParameters: ["mode": "read", "text": ""],
+                     inputPortLabels: ["触发"], outputPortLabels: ["剪贴板内容"],
+                     riskLevel: .none, description: "读取或写入系统剪贴板"),
+
+        NodeTemplate(id: "sys.deviceInfo", title: "设备信息", category: .fileData,
+                     iconSystemName: "iphone",
+                     defaultParameters: [:],
+                     inputPortLabels: ["触发"], outputPortLabels: ["设备信息"],
+                     riskLevel: .none, description: "获取设备型号、系统版本、电池状态等信息"),
+
+        NodeTemplate(id: "sys.alert", title: "弹窗拦截", category: .appControl,
+                     iconSystemName: "xmark.octagon",
+                     defaultParameters: ["buttonText": "确定", "delay": "1"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已拦截"],
+                     riskLevel: .low, description: "检测并自动点击弹窗按钮，拦截系统弹窗"),
+
+        NodeTemplate(id: "sys.appRestart", title: "重启应用", category: .appControl,
+                     iconSystemName: "arrow.clockwise",
+                     defaultParameters: ["bundleId": "", "delay": "2"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已重启"],
+                     riskLevel: .low, description: "关闭并重新打开指定应用"),
+
+        NodeTemplate(id: "sys.randomDelay", title: "随机延时", category: .aiLogic,
+                     iconSystemName: "shuffle",
+                     defaultParameters: ["min": "1", "max": "5"],
+                     inputPortLabels: ["触发"], outputPortLabels: ["已完成"],
+                     riskLevel: .none, description: "随机延时min~max秒，模拟人工操作节奏"),
     ]
 
     // Get templates by category

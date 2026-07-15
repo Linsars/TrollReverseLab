@@ -174,12 +174,60 @@ struct PermissionCheckerView: View {
                     }
                 }
 
+                // MARK: - Coordinate Picker
+                Section(header: Text("坐标拾取工具")) {
+                    NavigationLink(destination: CoordinatePickerView()) {
+                        HStack {
+                            Image(systemName: "scope")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("坐标拾取")
+                                Text("拾取屏幕坐标，标注操作点位")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // MARK: - Status Dashboard
+                Section(header: Text("设备监控")) {
+                    NavigationLink(destination: StatusDashboardView()) {
+                        HStack {
+                            Image(systemName: "gauge.high")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("状态面板")
+                                Text("设备温度、电池、任务进度监控")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // MARK: - IPA Builder
+                Section(header: Text("IPA 编译工具")) {
+                    NavigationLink(destination: IPABuilderView()) {
+                        HStack {
+                            Image(systemName: "hammer")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("IPA 编译")
+                                Text("AI 生成源码，打包编译 IPA")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // MARK: - About
                 Section(header: Text("关于")) {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("4.0.0").foregroundColor(.secondary)
+                        Text("5.0.0").foregroundColor(.secondary)
                     }
                     HStack {
                         Text("适用环境")
@@ -189,7 +237,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("功能模块")
                         Spacer()
-                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 备份").foregroundColor(.secondary).font(.caption)
+                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 坐标拾取 · 状态面板 · IPA编译 · 备份").foregroundColor(.secondary).font(.caption)
                     }
                     HStack {
                         Text("扫描路径")

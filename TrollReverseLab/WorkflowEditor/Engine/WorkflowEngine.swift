@@ -37,10 +37,32 @@ class WorkflowEngine: ObservableObject {
     @Published var pendingRiskNode: WorkflowNode?
     @Published var showRiskAlert: Bool = false
 
+    // Node search
+    @Published var searchText: String = ""
+    @Published var showNodeLibrary: Bool = false
+
+    // Debug mode
+    @Published var isDebugMode: Bool = false
+    @Published var debugCurrentNodeID: UUID?
+    @Published var debugStep: Int = 0
+
     // AI context (from other modules)
     var trafficContext: String?
     var targetAppBundleId: String?
     var targetAppName: String?
+    var coordinateContext: String?  // from CoordinatePicker
+
+    // Filtered templates for search
+    var filteredTemplates: [NodeTemplate] {
+        if searchText.isEmpty {
+            return NodeRegistry.templates
+        }
+        return NodeRegistry.templates.filter { template in
+            template.title.localizedCaseInsensitiveContains(searchText) ||
+            template.description.localizedCaseInsensitiveContains(searchText) ||
+            template.id.localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
     // AI client
     var aiClient: AIScriptClient
@@ -465,5 +487,74 @@ class WorkflowEngine: ObservableObject {
         }
 
         return script
+    }
+
+    // MARK: - JSON Import / Export
+
+    func exportAsJSON() -> String? {
+        let workflow = Workflow(
+            id: workflowID,
+            name: workflowName,
+            description: lastUserInput,
+            nodes: nodes,
+            connections: connections,
+            createdAt: Date(),
+            updatedAt: Date(),
+            userInput: lastUserInput
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        guard let data = try? encoder.encode(workflow) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func importFromJSON(_ json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let workflow = try? JSONDecoder().decode(Workflow.self, from: data) else {
+            return false
+        }
+        loadWorkflow(workflow)
+        return true
+    }
+
+    // MARK: - Single-Step Debug
+
+    func startDebug() {
+        guard let order = Workflow(nodes: nodes, connections: connections).executionOrder(),
+              !order.isEmpty else { return }
+        isDebugMode = true
+        debugStep = 0
+        debugCurrentNodeID = order.first
+    }
+
+    func stepForward() {
+        guard isDebugMode else { return }
+        guard let order = Workflow(nodes: nodes, connections: connections).executionOrder() else { return }
+        debugStep += 1
+        if debugStep < order.count {
+            debugCurrentNodeID = order[debugStep]
+        } else {
+            stopDebug()
+        }
+    }
+
+    func stopDebug() {
+        isDebugMode = false
+        debugCurrentNodeID = nil
+        debugStep = 0
+    }
+
+    var debugProgress: String {
+        guard isDebugMode,
+              let order = Workflow(nodes: nodes, connections: connections).executionOrder() else {
+            return ""
+        }
+        return "步骤 \(debugStep + 1) / \(order.count)"
+    }
+
+    // MARK: - Coordinate Context Integration
+
+    func setCoordinateContext(_ context: String?) {
+        coordinateContext = context
     }
 }

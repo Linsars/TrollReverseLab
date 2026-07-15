@@ -187,4 +187,171 @@ public final class PacketCaptureEngine: ObservableObject {
         }
         capturedRequests = decoded
     }
+
+    // MARK: - HAR Export
+
+    /// Export captured requests as HAR (HTTP Archive) format JSON
+    public func exportAsHAR() -> String? {
+        let entries = capturedRequests.map { req -> [String: Any] in
+            var entry: [String: Any] = [:]
+
+            // Request
+            var request: [String: Any] = [:]
+            request["method"] = req.method
+            request["url"] = req.url
+            request["httpVersion"] = "HTTP/1.1"
+
+            var headers = [[String: String]]()
+            for (key, value) in req.requestHeaders {
+                headers.append(["name": key, "value": value])
+            }
+            request["headers"] = headers
+
+            if let body = req.requestBody {
+                request["bodySize"] = body.count
+                var postData: [String: Any] = [:]
+                postData["mimeType"] = req.requestHeaders["Content-Type"] ?? "application/octet-stream"
+                postData["text"] = req.requestBodyString
+                request["postData"] = postData
+            } else {
+                request["bodySize"] = 0
+            }
+
+            entry["request"] = request
+
+            // Response
+            var response: [String: Any] = [:]
+            response["status"] = req.responseStatus
+            response["statusText"] = ""
+            response["httpVersion"] = "HTTP/1.1"
+
+            var respHeaders = [[String: String]]()
+            for (key, value) in req.responseHeaders {
+                respHeaders.append(["name": key, "value": value])
+            }
+            response["headers"] = respHeaders
+
+            if let body = req.responseBody {
+                response["bodySize"] = body.count
+                response["content"] = [
+                    "size": body.count,
+                    "mimeType": req.contentType,
+                    "text": req.responseBodyString
+                ]
+            } else {
+                response["bodySize"] = 0
+                response["content"] = ["size": 0, "mimeType": ""]
+            }
+
+            entry["response"] = response
+
+            // Timing
+            entry["startedDateTime"] = iso8601String(req.timestamp)
+            entry["time"] = req.duration * 1000  // milliseconds
+
+            return entry
+        }
+
+        let har: [String: Any] = [
+            "log": [
+                "version": "1.2",
+                "creator": [
+                    "name": "TrollReverseLab",
+                    "version": "5.0.0"
+                ],
+                "entries": entries
+            ]
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: har, options: .prettyPrinted),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return nil
+    }
+
+    /// Save HAR to Documents and return the file path
+    public func saveHARFile() -> String? {
+        guard let har = exportAsHAR() else { return nil }
+        let fileName = "capture_\(Int(Date().timeIntervalSince1970)).har"
+        let fileURL = URL(fileURLWithPath: capturesFile)
+            .deletingLastPathComponent()
+            .appendingPathComponent(fileName)
+        do {
+            try har.write(to: fileURL, atomically: true, encoding: .utf8)
+            return fileURL.path
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Request Replay
+
+    /// Replay a captured request and return the response
+    public func replayRequest(_ request: CapturedRequest, completion: @escaping (Result<(Int, [String: String], Data?), Error>) -> Void) {
+        guard let url = URL(string: request.url) else {
+            completion(.failure(NSError(domain: "PacketCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])))
+            return
+        }
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = request.method
+
+        // Copy headers
+        for (key, value) in request.requestHeaders {
+            // Skip proxy-related headers
+            let lowerKey = key.lowercased()
+            if lowerKey == "host" || lowerKey == "proxy-connection" || lowerKey == "connection" {
+                continue
+            }
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+
+        // Copy body
+        urlRequest.httpBody = request.requestBody
+        urlRequest.timeoutInterval = 30
+
+        URLSession.shared.dataTask(with: urlRequest) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(NSError(domain: "PacketCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])))
+                return
+            }
+            var headers: [String: String] = [:]
+            for (key, value) in httpResponse.allHeaderFields {
+                headers["\(key)"] = "\(value)"
+            }
+            completion(.success((httpResponse.statusCode, headers, data)))
+        }.resume()
+    }
+
+    // MARK: - JSON Body Formatting
+
+    /// Pretty-print JSON body if applicable
+    public static func prettyFormatJSON(_ text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+              let result = String(data: pretty, encoding: .utf8) else {
+            return nil
+        }
+        return result
+    }
+
+    /// Check if content type is JSON
+    public static func isJSON(_ contentType: String) -> Bool {
+        return contentType.lowercased().contains("json")
+    }
+
+    // MARK: - Helpers
+
+    private func iso8601String(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
 }
