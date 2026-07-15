@@ -26,6 +26,10 @@ struct TrollReverseLabApp: App {
     @StateObject private var coordinateManager = CoordinatePickerManager()
     @StateObject private var statusManager = DeviceStatusManager()
     @StateObject private var ipaBuilder = IPABuilderManager()
+    @StateObject private var materialEditor = MaterialEditorManager()
+    @StateObject private var contentScheduler = ContentSchedulerManager()
+    @StateObject private var scriptRecorder = ScriptRecorderManager()
+    @StateObject private var sandboxLab = SandboxLabManager()
 
     var body: some Scene {
         WindowGroup {
@@ -38,6 +42,10 @@ struct TrollReverseLabApp: App {
                 .environmentObject(coordinateManager)
                 .environmentObject(statusManager)
                 .environmentObject(ipaBuilder)
+                .environmentObject(materialEditor)
+                .environmentObject(contentScheduler)
+                .environmentObject(scriptRecorder)
+                .environmentObject(sandboxLab)
                 .onAppear {
                     checkFirstLaunchAgreement()
                 }
@@ -135,6 +143,8 @@ struct UsageAgreementView: View {
                         AgreementItem(text: "客户端数据结构调试与分析")
                         AgreementItem(text: "Frida 逆向技术教学与学习")
                         AgreementItem(text: "iOS 沙盒机制与存储原理研究")
+                        AgreementItem(text: "个人原创内容素材编辑与排版")
+                        AgreementItem(text: "iOS 交互流程录制与学习")
                     }
 
                     Text("严禁用于以下用途：")
@@ -147,6 +157,8 @@ struct UsageAgreementView: View {
                         AgreementItem(text: "联机游戏篡改、批量破解", isProhibited: true)
                         AgreementItem(text: "侵犯软件版权、盗取隐私数据", isProhibited: true)
                         AgreementItem(text: "对外分发破解脚本、商业化破解", isProhibited: true)
+                        AgreementItem(text: "批量矩阵营销、虚假互动刷量", isProhibited: true)
+                        AgreementItem(text: "规避平台风控、批量养号运营", isProhibited: true)
                     }
 
                     Text("本工具仅针对用户自选的 TrollStore 安装应用做本地研究，不用于访问系统核心进程、App Store 应用或第三方隐私数据。")

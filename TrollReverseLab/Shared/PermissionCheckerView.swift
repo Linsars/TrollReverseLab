@@ -222,12 +222,76 @@ struct PermissionCheckerView: View {
                     }
                 }
 
+                // MARK: - Material Editor
+                Section(header: Text("素材编辑器")) {
+                    NavigationLink(destination: MaterialEditorView()) {
+                        HStack {
+                            Image(systemName: "doc.richtext")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("素材编辑")
+                                Text("多平台格式排版、文案润色、配图裁切")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // MARK: - Content Scheduler
+                Section(header: Text("内容排期")) {
+                    NavigationLink(destination: ContentSchedulerView()) {
+                        HStack {
+                            Image(systemName: "calendar.badge.clock")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("排期提醒")
+                                Text("个人原创内容创作排期、本地提醒")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // MARK: - Script Recorder
+                Section(header: Text("脚本录制")) {
+                    NavigationLink(destination: ScriptRecorderView()) {
+                        HStack {
+                            Image(systemName: "record.circle")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("脚本录制")
+                                Text("手动录制交互动作，学习 UI 自动化")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                // MARK: - Sandbox Lab
+                Section(header: Text("沙盒教学")) {
+                    NavigationLink(destination: SandboxLabView()) {
+                        HStack {
+                            Image(systemName: "shield.lefthalf.filled")
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading) {
+                                Text("沙盒隔离教学")
+                                Text("iOS 沙盒机制、权限体系、进程 Hook 教学")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // MARK: - About
                 Section(header: Text("关于")) {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("5.0.0").foregroundColor(.secondary)
+                        Text("6.0.0").foregroundColor(.secondary)
                     }
                     HStack {
                         Text("适用环境")
@@ -237,7 +301,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("功能模块")
                         Spacer()
-                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 坐标拾取 · 状态面板 · IPA编译 · 备份").foregroundColor(.secondary).font(.caption)
+                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 坐标拾取 · 状态面板 · IPA编译 · 备份 · 素材编辑 · 内容排期 · 脚本录制 · 沙盒教学").foregroundColor(.secondary).font(.caption)
                     }
                     HStack {
                         Text("扫描路径")

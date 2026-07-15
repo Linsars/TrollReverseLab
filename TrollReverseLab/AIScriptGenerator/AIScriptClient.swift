@@ -256,6 +256,17 @@ public final class AIScriptClient: ObservableObject {
         }
     }
 
+    // MARK: - General Text Processing
+
+    /// Process text using the LLM API for general purposes (not script generation).
+    /// Used by MaterialEditor for copywriting refinement.
+    public func processText(messages: [ChatMessage]) async throws -> String {
+        guard !config.apiKey.isEmpty else {
+            throw AIScriptError.missingAPIKey
+        }
+        return try await callChatAPI(messages: messages)
+    }
+
     // MARK: - Utilities
 
     /// Extracts code block from markdown-formatted LLM response.
