@@ -161,7 +161,7 @@ struct MoreView: View {
 
     private var aboutFooter: some View {
         VStack(spacing: 4) {
-            Text("TrollReverseLab v6.0.1")
+            Text("TrollReverseLab v6.0.2")
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text("适用于 TrollStore 环境 · iOS 14+")
