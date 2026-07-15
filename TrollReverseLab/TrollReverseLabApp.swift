@@ -95,21 +95,12 @@ struct MainTabView: View {
                 }
                 .tag(3)
 
-            // Module 5: Workflow Editor (Visual Node Canvas)
-            NavigationView {
-                WorkflowEditorView()
-            }
-            .tabItem {
-                Label("工作流", systemImage: "square.grid.2x2.fill")
-            }
-            .tag(4)
-
-            // Module 6: Settings & Permission Self-Check
-            PermissionCheckerView()
+            // Module 5: More tools (workflow, settings, tools)
+            MoreView()
                 .tabItem {
-                    Label("设置", systemImage: "gearshape")
+                    Label("更多", systemImage: "ellipsis")
                 }
-                .tag(5)
+                .tag(4)
         }
         .sheet(isPresented: $showAgreement) {
             UsageAgreementView(isPresented: $showAgreement)

@@ -30,10 +30,9 @@ struct PermissionCheckerView: View {
     @AppStorage("frida_gadget_mode") private var gadgetMode = "interactive"
 
     var body: some View {
-        NavigationView {
-            Form {
-                // MARK: - Permission Status
-                Section(header: Text("沙盒逃逸权限"), footer: Text("no-sandbox 权限是访问 /var/mobile/Containers/ 的前提")) {
+        Form {
+            // MARK: - Permission Status
+            Section(header: Text("沙盒逃逸权限"), footer: Text("no-sandbox 权限是访问 /var/mobile/Containers/ 的前提")) {
                     HStack {
                         Image(systemName: hasSandboxEscape ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .foregroundColor(hasSandboxEscape ? .green : .red)
@@ -291,7 +290,7 @@ struct PermissionCheckerView: View {
                     HStack {
                         Text("版本")
                         Spacer()
-                        Text("6.0.0").foregroundColor(.secondary)
+                        Text("6.0.1").foregroundColor(.secondary)
                     }
                     HStack {
                         Text("适用环境")
@@ -319,7 +318,6 @@ struct PermissionCheckerView: View {
                     runCheck()
                 }
             }
-        }
     }
 
     // MARK: - Actions
