@@ -198,8 +198,9 @@ class CoordinatePickerManager: ObservableObject {
 
     /// Take a screenshot of current screen
     func captureScreen() -> UIImage? {
-        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else {
-            return UIApplication.shared.windows.first?.screenCapture
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ??
+              UIApplication.shared.windows.first else {
+            return nil
         }
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         return renderer.image { _ in
@@ -347,17 +348,5 @@ class CoordinatePickerManager: ObservableObject {
             return group.aiExport
         }
         return exportAllAsText()
-    }
-}
-
-// MARK: - UIWindow Screen Capture Extension
-
-extension UIScreen {
-    var screenCapture: UIImage? {
-        guard let window = UIApplication.shared.windows.first else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
-        return renderer.image { _ in
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-        }
     }
 }

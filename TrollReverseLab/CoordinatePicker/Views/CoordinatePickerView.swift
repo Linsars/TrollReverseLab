@@ -47,8 +47,8 @@ struct CoordinatePickerView: View {
                 ImportSheet(manager: manager, importText: $importText)
             }
             .sheet(isPresented: $showAppPicker) {
-                AppPickerSheet(
-                    apps: appScanner.scannedApps,
+                CoordAppPickerSheet(
+                    apps: appScanner.apps,
                     onPick: { app in
                         showAppPicker = false
                         showActionPicker = true
@@ -227,7 +227,7 @@ struct CoordinateGroupDetailView: View {
             }
 
             // Coordinates list
-            Section("坐标点位 (\(currentGroup.coordinateCount))") {
+            Section(header: Text("坐标点位 (\(currentGroup.coordinateCount))")) {
                 if currentGroup.coordinates.isEmpty {
                     Text("暂无坐标，点击右上角开始拾取")
                         .foregroundColor(.secondary)
@@ -250,7 +250,7 @@ struct CoordinateGroupDetailView: View {
 
             // AI Export preview
             if !currentGroup.coordinates.isEmpty {
-                Section("AI 上下文预览") {
+                Section(header: Text("AI 上下文预览")) {
                     Text(currentGroup.aiExport)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
@@ -416,7 +416,7 @@ struct ActionTypePicker: View {
 
 // MARK: - App Picker Sheet
 
-struct AppPickerSheet: View {
+struct CoordAppPickerSheet: View {
     let apps: [TrollStoreApp]
     let onPick: (TrollStoreApp) -> Void
     @Environment(\.presentationMode) var presentationMode
@@ -429,16 +429,9 @@ struct AppPickerSheet: View {
                         onPick(app)
                     }) {
                         HStack {
-                            if let icon = app.icon {
-                                Image(uiImage: icon)
-                                    .resizable()
-                                    .frame(width: 40, height: 40)
-                                    .cornerRadius(8)
-                            } else {
-                                Image(systemName: "app")
-                                    .frame(width: 40, height: 40)
-                                    .foregroundColor(.secondary)
-                            }
+                            Image(systemName: "app")
+                                .frame(width: 40, height: 40)
+                                .foregroundColor(.secondary)
                             VStack(alignment: .leading) {
                                 Text(app.displayName)
                                     .foregroundColor(.primary)
@@ -448,6 +441,7 @@ struct AppPickerSheet: View {
                             }
                         }
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
             .listStyle(InsetGroupedListStyle())
