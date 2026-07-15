@@ -272,8 +272,7 @@ class WorkflowEngine: ObservableObject {
             let template = NodeRegistry.template(id: templateId)
             let node: WorkflowNode
             if let template = template {
-                node = NodeRegistry.createNode(from: template, position: .zero)
-                var mutableNode = node
+                var mutableNode = NodeRegistry.createNode(from: template, position: .zero)
                 if !title.isEmpty { mutableNode.title = title }
                 mutableNode.aiNote = note
                 mutableNode.parameters.merge(params) { _, new in new }
