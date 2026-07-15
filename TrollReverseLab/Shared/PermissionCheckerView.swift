@@ -2,14 +2,14 @@
 //  PermissionCheckerView.swift
 //  TrollReverseLab
 //
-//  Module 4: Permission Self-Check & Capture
+//  Module 4: Permission Self-Check & Settings
 //  Tests whether the app's entitlements are properly applied and
 //  verifies actual filesystem access to key sandbox directories.
+//  Also hosts AI model and Frida configuration.
 //
-//  INTEGRATED FROM: Entitlements injection + permission verification logic
-//  - Runs live access tests against sandbox paths
-//  - Shows which entitlements are expected vs applied
-//  - Includes app settings (LLM API, Frida config)
+//  NOTE: Tool entry points (coordinate picker, status dashboard, IPA builder,
+//  backup, material editor, content scheduler, script recorder, sandbox lab)
+//  have been moved to MoreView to avoid duplication.
 //
 
 import SwiftUI
@@ -33,291 +33,163 @@ struct PermissionCheckerView: View {
         Form {
             // MARK: - Permission Status
             Section(header: Text("沙盒逃逸权限"), footer: Text("no-sandbox 权限是访问 /var/mobile/Containers/ 的前提")) {
-                    HStack {
-                        Image(systemName: hasSandboxEscape ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundColor(hasSandboxEscape ? .green : .red)
-                        Text(hasSandboxEscape ? "已生效" : "未生效")
-                            .fontWeight(.medium)
-                    }
+                HStack {
+                    Image(systemName: hasSandboxEscape ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundColor(hasSandboxEscape ? .green : .red)
+                    Text(hasSandboxEscape ? "已生效" : "未生效")
+                        .fontWeight(.medium)
+                }
 
-                    if isChecking {
-                        HStack {
-                            ProgressView()
-                            Text("正在检测...")
-                                .font(.caption)
+                if isChecking {
+                    HStack {
+                        ProgressView()
+                        Text("正在检测...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Button {
+                    runCheck()
+                } label: {
+                    Label("运行权限检测", systemImage: "shield.checkered")
+                }
+            }
+
+            // MARK: - Path Access Results
+            if !checkResults.isEmpty {
+                Section(header: Text("路径访问测试")) {
+                    ForEach(checkResults.indices, id: \.self) { index in
+                        let result = checkResults[index]
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Image(systemName: result.isAccessible ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundColor(result.isAccessible ? .green : .red)
+                                    .font(.caption)
+                                Text(result.path)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(1)
+                            }
+                            if result.isAccessible {
+                                Text("可访问 — \(result.itemCount) 个条目")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            } else if let error = result.error {
+                                Text("失败: \(error)")
+                                    .font(.caption2)
+                                    .foregroundColor(.red)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+
+                // Summary
+                Section(header: Text("检测结果汇总")) {
+                    let accessible = checkResults.filter { $0.isAccessible }.count
+                    let total = checkResults.count
+                    DiagnosticRow(label: "可访问路径", value: "\(accessible) / \(total)")
+                    DiagnosticRow(label: "失败路径", value: "\(total - accessible)")
+
+                    if accessible == 0 {
+                        Text("所有路径均无法访问。IPA 缺失 no-sandbox 沙盒逃逸权限。请重新打包 IPA 并确保 entitlements 包含 com.apple.private.security.no-sandbox。")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else if accessible < total {
+                        Text("部分路径可访问。可能需要额外权限（如 container-manager、storage.AppDataContainers）。")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else {
+                        Text("所有路径均可访问。权限配置正常。")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            // MARK: - Expected Entitlements
+            Section(header: Text("预期权限清单"), footer: Text("这些权限应在打包时通过 ldid 注入到 IPA 中")) {
+                ForEach(expectedEntitlements, id: \.key) { ent in
+                    HStack {
+                        Image(systemName: "key.fill")
+                            .foregroundColor(.accentColor)
+                            .font(.caption)
+                        VStack(alignment: .leading) {
+                            Text(ent.key)
+                                .font(.system(.caption2, design: .monospaced))
+                            Text(ent.desc)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
                     }
-
-                    Button {
-                        runCheck()
-                    } label: {
-                        Label("运行权限检测", systemImage: "shield.checkered")
-                    }
                 }
+            }
 
-                // MARK: - Path Access Results
-                if !checkResults.isEmpty {
-                    Section(header: Text("路径访问测试")) {
-                        ForEach(checkResults.indices, id: \.self) { index in
-                            let result = checkResults[index]
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Image(systemName: result.isAccessible ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .foregroundColor(result.isAccessible ? .green : .red)
-                                        .font(.caption)
-                                    Text(result.path)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .lineLimit(1)
-                                }
-                                if result.isAccessible {
-                                    Text("可访问 — \(result.itemCount) 个条目")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                } else if let error = result.error {
-                                    Text("失败: \(error)")
-                                        .font(.caption2)
-                                        .foregroundColor(.red)
-                                        .lineLimit(2)
-                                }
-                            }
-                        }
-                    }
+            // MARK: - LLM API Configuration
+            Section(header: Text("AI 模型配置"), footer: Text("配置 OpenAI 兼容 API 用于生成逆向学习脚本")) {
+                TextField("API Base URL", text: $apiBaseURL)
+                    .keyboardType(.URL)
+                    .autocapitalization(.none)
 
-                    // Summary
-                    Section(header: Text("检测结果汇总")) {
-                        let accessible = checkResults.filter { $0.isAccessible }.count
-                        let total = checkResults.count
-                        DiagnosticRow(label: "可访问路径", value: "\(accessible) / \(total)")
-                        DiagnosticRow(label: "失败路径", value: "\(total - accessible)")
+                SecureField("API Key", text: $apiKey)
+                    .autocapitalization(.none)
 
-                        if accessible == 0 {
-                            Text("所有路径均无法访问。IPA 缺失 no-sandbox 沙盒逃逸权限。请重新打包 IPA 并确保 entitlements 包含 com.apple.private.security.no-sandbox。")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        } else if accessible < total {
-                            Text("部分路径可访问。可能需要额外权限（如 container-manager、storage.AppDataContainers）。")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                        } else {
-                            Text("所有路径均可访问。权限配置正常。")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
-                    }
-                }
+                TextField("Model", text: $model)
+                    .autocapitalization(.none)
 
-                // MARK: - Expected Entitlements
-                Section(header: Text("预期权限清单"), footer: Text("这些权限应在打包时通过 ldid 注入到 IPA 中")) {
-                    ForEach(expectedEntitlements, id: \.key) { ent in
-                        HStack {
-                            Image(systemName: "key.fill")
-                                .foregroundColor(.accentColor)
-                                .font(.caption)
-                            VStack(alignment: .leading) {
-                                Text(ent.key)
-                                    .font(.system(.caption2, design: .monospaced))
-                                Text(ent.desc)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - LLM API Configuration
-                Section(header: Text("AI 模型配置"), footer: Text("配置 OpenAI 兼容 API 用于生成逆向学习脚本")) {
-                    TextField("API Base URL", text: $apiBaseURL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-
-                    SecureField("API Key", text: $apiKey)
-                        .autocapitalization(.none)
-
-                    TextField("Model", text: $model)
-                        .autocapitalization(.none)
-
-                    HStack {
-                        Text("Temperature")
-                        Spacer()
-                        Slider(value: $temperature, in: 0...1, step: 0.1)
-                            .frame(width: 120)
-                        Text(String(format: "%.1f", temperature))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .frame(width: 30, alignment: .trailing)
-                    }
-                }
-
-                // MARK: - Frida Configuration
-                Section(header: Text("Frida 调试配置")) {
-                    Picker("Gadget 模式", selection: $gadgetMode) {
-                        Text("交互模式").tag("interactive")
-                        Text("脚本模式").tag("script")
-                    }
-                }
-
-                // MARK: - App Data Backup
-                Section(header: Text("应用数据备份"), footer: Text("备份/还原应用数据，AI 操作前可自动备份")) {
-                    NavigationLink(destination: AppBackupView()) {
-                        HStack {
-                            Image(systemName: "doc.on.doc.fill")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("备份管理")
-                                Text("管理应用数据备份与还原")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Coordinate Picker
-                Section(header: Text("坐标拾取工具")) {
-                    NavigationLink(destination: CoordinatePickerView()) {
-                        HStack {
-                            Image(systemName: "scope")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("坐标拾取")
-                                Text("拾取屏幕坐标，标注操作点位")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Status Dashboard
-                Section(header: Text("设备监控")) {
-                    NavigationLink(destination: StatusDashboardView()) {
-                        HStack {
-                            Image(systemName: "gauge.high")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("状态面板")
-                                Text("设备温度、电池、任务进度监控")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - IPA Builder
-                Section(header: Text("IPA 编译工具")) {
-                    NavigationLink(destination: IPABuilderView()) {
-                        HStack {
-                            Image(systemName: "hammer")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("IPA 编译")
-                                Text("AI 生成源码，打包编译 IPA")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Material Editor
-                Section(header: Text("素材编辑器")) {
-                    NavigationLink(destination: MaterialEditorView()) {
-                        HStack {
-                            Image(systemName: "doc.richtext")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("素材编辑")
-                                Text("多平台格式排版、文案润色、配图裁切")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Content Scheduler
-                Section(header: Text("内容排期")) {
-                    NavigationLink(destination: ContentSchedulerView()) {
-                        HStack {
-                            Image(systemName: "calendar.badge.clock")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("排期提醒")
-                                Text("个人原创内容创作排期、本地提醒")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Script Recorder
-                Section(header: Text("脚本录制")) {
-                    NavigationLink(destination: ScriptRecorderView()) {
-                        HStack {
-                            Image(systemName: "record.circle")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("脚本录制")
-                                Text("手动录制交互动作，学习 UI 自动化")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - Sandbox Lab
-                Section(header: Text("沙盒教学")) {
-                    NavigationLink(destination: SandboxLabView()) {
-                        HStack {
-                            Image(systemName: "shield.lefthalf.filled")
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading) {
-                                Text("沙盒隔离教学")
-                                Text("iOS 沙盒机制、权限体系、进程 Hook 教学")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                // MARK: - About
-                Section(header: Text("关于")) {
-                    HStack {
-                        Text("版本")
-                        Spacer()
-                        Text("6.0.1").foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("适用环境")
-                        Spacer()
-                        Text("纯 TrollStore（无越狱）").foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("功能模块")
-                        Spacer()
-                        Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 坐标拾取 · 状态面板 · IPA编译 · 备份 · 素材编辑 · 内容排期 · 脚本录制 · 沙盒教学").foregroundColor(.secondary).font(.caption)
-                    }
-                    HStack {
-                        Text("扫描路径")
-                        Spacer()
-                        Text("/var/containers/Bundle/Application/").foregroundColor(.secondary).font(.caption)
-                    }
-                    Text("TrollReverseLab 是一款 iOS 本地逆向学习工具，仅用于个人技术研究与学习。严禁用于内购绕过、支付欺诈、联机作弊及商业破解用途。")
+                HStack {
+                    Text("Temperature")
+                    Spacer()
+                    Slider(value: $temperature, in: 0...1, step: 0.1)
+                        .frame(width: 120)
+                    Text(String(format: "%.1f", temperature))
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .frame(width: 30, alignment: .trailing)
                 }
             }
-            .navigationTitle("设置")
-            .onAppear {
-                if checkResults.isEmpty {
-                    runCheck()
+
+            // MARK: - Frida Configuration
+            Section(header: Text("Frida 调试配置")) {
+                Picker("Gadget 模式", selection: $gadgetMode) {
+                    Text("交互模式").tag("interactive")
+                    Text("脚本模式").tag("script")
                 }
             }
+
+            // MARK: - About
+            Section(header: Text("关于")) {
+                HStack {
+                    Text("版本")
+                    Spacer()
+                    Text("6.0.1").foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("适用环境")
+                    Spacer()
+                    Text("纯 TrollStore（无越狱）").foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("功能模块")
+                    Spacer()
+                    Text("沙盒浏览 · 抓包 · Frida · AI脚本 · 工作流 · 坐标拾取 · 状态面板 · IPA编译 · 备份 · 素材编辑 · 内容排期 · 脚本录制 · 沙盒教学").foregroundColor(.secondary).font(.caption)
+                }
+                HStack {
+                    Text("扫描路径")
+                    Spacer()
+                    Text("/var/containers/Bundle/Application/").foregroundColor(.secondary).font(.caption)
+                }
+                Text("TrollReverseLab 是一款 iOS 本地逆向学习工具，仅用于个人技术研究与学习。严禁用于内购绕过、支付欺诈、联机作弊及商业破解用途。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("设置")
+        .onAppear {
+            if checkResults.isEmpty {
+                runCheck()
+            }
+        }
     }
 
     // MARK: - Actions

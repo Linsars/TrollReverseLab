@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct AIScriptView: View {
     @EnvironmentObject var aiClient: AIScriptClient
@@ -19,92 +20,107 @@ struct AIScriptView: View {
     @State private var appContext = ""
     @State private var selectedApp: TrollStoreApp?
     @State private var showAppPicker = false
-    @State private var showFullResponse = false
     @State private var errorMessage: String?
     @State private var attachTraffic = false
     @State private var trafficHostFilter = ""
-    @State private var showBackupView = false
+
+    // Custom colors (avoid iOS 15+ system colors)
+    private let accentBlue = Color(red: 0.25, green: 0.47, blue: 0.90)
+    private let cardBg = Color(.secondarySystemBackground)
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
                 // Input area
-                VStack(spacing: 12) {
-                    // Script type selector
-                    Picker("脚本类型", selection: $scriptType) {
-                        ForEach(ScriptType.allCases, id: \.self) { type in
-                            Text(type.displayName).tag(type)
+                VStack(spacing: 14) {
+                    // Script type selector with label
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text.below.ecg")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+                            Text("脚本类型")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
+                        Picker("脚本类型", selection: $scriptType) {
+                            ForEach(ScriptType.allCases, id: \.self) { type in
+                                Text(type.displayName).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
 
                     // Target app selector
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("目标应用（可选）")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Button {
-                            showAppPicker = true
-                        } label: {
-                            HStack {
-                                if let app = selectedApp {
-                                    AppIconView(bundlePath: app.bundlePath)
-                                        .frame(width: 28, height: 28)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(app.displayName)
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text(app.bundleIdentifier)
-                                            .font(.caption2)
-                                            .foregroundColor(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                } else {
-                                    Image(systemName: "app.badge")
-                                        .foregroundColor(.secondary)
-                                    Text("选择要分析的应用")
+                    Button {
+                        showAppPicker = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            if let app = selectedApp {
+                                AppIconView(bundlePath: app.bundlePath)
+                                    .frame(width: 32, height: 32)
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(app.displayName)
                                         .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    Text(app.bundleIdentifier)
+                                        .font(.caption2)
                                         .foregroundColor(.secondary)
+                                        .lineLimit(1)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
+                            } else {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .fill(Color.accentColor.opacity(0.12))
+                                    Image(systemName: "app.badge")
+                                        .font(.title3)
+                                        .foregroundColor(.accentColor)
+                                }
+                                .frame(width: 32, height: 32)
+                                Text("选择目标应用（可选）")
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(PlainButtonStyle())
+                        .padding(10)
+                        .background(cardBg)
+                        .cornerRadius(10)
                     }
+                    .buttonStyle(PlainButtonStyle())
 
-                    // Traffic context (if captures available)
+                    // Traffic context
                     if captureEngine.hasCapturedData {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Toggle(isOn: $attachTraffic) {
-                                HStack {
+                                HStack(spacing: 4) {
                                     Image(systemName: "antenna.radiowaves.left.and.right")
                                         .font(.caption)
-                                    Text("附加抓包数据 (\(captureEngine.captureCount) 条)")
+                                    Text("附加抓包数据")
                                         .font(.caption)
+                                    Text("(\(captureEngine.captureCount) 条)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
                                 }
                             }
-
                             if attachTraffic {
-                                TextField("按主机过滤（可选，如 api.example.com）", text: $trafficHostFilter)
+                                TextField("按主机过滤（如 api.example.com）", text: $trafficHostFilter)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.caption)
                                     .autocapitalization(.none)
                             }
                         }
-
                         Divider()
                     }
 
-                    // Auto-backup toggle (if app selected)
+                    // Auto-backup
                     if selectedApp != nil {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Image(systemName: "arrow.uturn.backward.circle")
                                     .font(.caption)
@@ -113,82 +129,120 @@ struct AIScriptView: View {
                                     get: { backupManager.autoBackupEnabled },
                                     set: { backupManager.setAutoBackup($0) }
                                 )) {
-                                    Text("AI 操作前自动备份应用数据")
+                                    Text("AI 操作前自动备份")
                                         .font(.caption)
                                 }
                             }
-
                             NavigationLink(destination: AppBackupView()) {
                                 HStack {
                                     Image(systemName: "doc.on.doc")
-                                        .font(.caption)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
                                     Text("管理备份 (\(backupManager.backups.count))")
-                                        .font(.caption)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
-
                         Divider()
                     }
 
-                    // Natural language input
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("描述你要分析的本地数据或函数")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
+                    // Description input
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.bubble")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+                            Text("分析需求描述")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(description.count) 字")
+                                .font(.caption2)
+                                .foregroundColor(description.count > 500 ? .red : .secondary)
+                        }
                         ZStack(alignment: .topLeading) {
-                            TextEditor(text: $description)
-                                .frame(height: 80)
-                                .font(.body)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color(.separator), lineWidth: 0.5)
-                                )
                             if description.isEmpty {
                                 Text("例如: 读取本地存档文件并解析其数据结构...")
                                     .font(.body)
                                     .foregroundColor(.secondary)
-                                    .padding(8)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 12)
                                     .allowsHitTesting(false)
                             }
+                            TextEditor(text: $description)
+                                .frame(height: 90)
+                                .font(.body)
+                                .padding(4)
+                                .background(Color(.systemBackground))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(.separator), lineWidth: 0.5)
+                                )
                         }
                     }
 
-                    // App context (optional)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("应用上下文（可选）")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
+                    // App context
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle")
+                                .font(.caption)
+                                .foregroundColor(.accentColor)
+                            Text("应用上下文（可选）")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         TextField("例如: 某单机游戏的本地存档格式", text: $appContext)
                             .textFieldStyle(.roundedBorder)
                             .font(.caption)
+                            .autocapitalization(.none)
                     }
 
                     // Generate button
                     Button {
                         Task { await generateScript() }
                     } label: {
-                        HStack {
+                        HStack(spacing: 6) {
                             if aiClient.isGenerating {
                                 ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "sparkles")
                             }
                             Text(aiClient.isGenerating ? "生成中..." : "生成脚本")
+                                .font(.headline)
                         }
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundColor(.white)
+                        .background(
+                            description.isEmpty || aiClient.isGenerating
+                                ? Color.gray.opacity(0.4)
+                                : accentBlue
+                        )
+                        .cornerRadius(10)
                     }
-                    .buttonStyle(DefaultButtonStyle())
+                    .buttonStyle(PlainButtonStyle())
                     .disabled(description.isEmpty || aiClient.isGenerating)
 
                     if let error = errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                            Text(error)
+                                .font(.caption)
+                        }
+                        .foregroundColor(.red)
+                        .padding(8)
+                        .background(Color.red.opacity(0.08))
+                        .cornerRadius(8)
                     }
                 }
                 .padding(16)
@@ -197,38 +251,19 @@ struct AIScriptView: View {
 
                 // Generated scripts list
                 if aiClient.generatedScripts.isEmpty {
-                    EmptyStateView(
-                        icon: "wand.and.stars",
-                        title: "尚未生成脚本",
-                        message: "描述你的本地逆向分析需求，AI 将生成对应的调试脚本"
-                    )
+                    emptyState
                 } else {
                     List(aiClient.generatedScripts.reversed()) { script in
                         NavigationLink(destination: ScriptDetailView(script: script)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(script.description)
-                                    .font(.body)
-                                    .lineLimit(2)
-
-                                HStack(spacing: 8) {
-                                    Text(script.scriptType.displayName)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentColor.opacity(0.15))
-                                        .cornerRadius(4)
-
-                                    Text(formatDate(script.timestamp))
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
+                            ScriptRow(script: script)
                         }
+                        .listRowBackground(Color(.systemBackground))
                     }
                     .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("AI 脚本生成")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(trailing: Button {
                 aiClient.resetConversation()
             } label: {
@@ -244,15 +279,40 @@ struct AIScriptView: View {
         }
     }
 
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.1))
+                    .frame(width: 72, height: 72)
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 30))
+                    .foregroundColor(.accentColor)
+            }
+            VStack(spacing: 6) {
+                Text("尚未生成脚本")
+                    .font(.headline)
+                Text("描述你的本地逆向分析需求\nAI 将生成对应的调试脚本")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+
     private func generateScript() async {
         errorMessage = nil
 
-        // Auto-backup before AI operation
         if let app = selectedApp {
             backupManager.autoBackupIfNeeded(for: app)
         }
 
-        // Build traffic context from captured data
         let trafficContext: String? = attachTraffic
             ? captureEngine.exportForAI(
                 hostFilter: trafficHostFilter.isEmpty ? nil : trafficHostFilter
@@ -275,18 +335,79 @@ struct AIScriptView: View {
     }
 }
 
-/// Detail view showing a generated script with syntax highlighting.
+// MARK: - Script Row
+
+private struct ScriptRow: View {
+    let script: GeneratedScript
+
+    private var typeColor: Color {
+        switch script.scriptType {
+        case .fridaJS:
+            return Color(red: 0.25, green: 0.47, blue: 0.90)
+        case .lua:
+            return Color(red: 0.20, green: 0.60, blue: 0.40)
+        }
+    }
+
+    private var typeIcon: String {
+        switch script.scriptType {
+        case .fridaJS:
+            return "ladybug"
+        case .lua:
+            return "moon"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(script.description)
+                .font(.body)
+                .lineLimit(2)
+                .foregroundColor(.primary)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 3) {
+                    Image(systemName: typeIcon)
+                        .font(.caption2)
+                    Text(script.scriptType.displayName)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(typeColor.opacity(0.15))
+                .foregroundColor(typeColor)
+                .cornerRadius(5)
+
+                Spacer()
+
+                HStack(spacing: 2) {
+                    Image(systemName: "clock")
+                        .font(.caption2)
+                    Text(formatDate(script.timestamp))
+                        .font(.caption2)
+                }
+                .foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Script Detail View
+
 struct ScriptDetailView: View {
     let script: GeneratedScript
     @EnvironmentObject var aiClient: AIScriptClient
     @State private var showSavedAlert = false
     @State private var saveResult = false
+    @State private var copied = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Script info
-                VStack(alignment: .leading, spacing: 8) {
+                // Script info card
+                VStack(alignment: .leading, spacing: 10) {
                     Text(script.description)
                         .font(.headline)
 
@@ -300,27 +421,62 @@ struct ScriptDetailView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-
-                Divider()
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
 
                 // Code block
-                Text(script.code)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(8)
-                    .modifier(SelectableTextModifier())
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("脚本代码")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button {
+                            UIPasteboard.general.string = script.code
+                            withAnimation { copied = true }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                withAnimation { copied = false }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                    .font(.caption2)
+                                Text(copied ? "已复制" : "复制")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(copied ? .green : .accentColor)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    Text(script.code)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(8)
+                        .modifier(SelectableTextModifier())
+                }
 
                 // Save button
                 Button {
                     saveResult = aiClient.saveScript(script)
                     showSavedAlert = true
                 } label: {
-                    Label("保存到本地", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("保存到本地")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .foregroundColor(.white)
+                    .background(Color.accentColor)
+                    .cornerRadius(10)
                 }
-                .buttonStyle(BorderlessButtonStyle())
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(16)
         }
@@ -336,14 +492,14 @@ struct ScriptDetailView: View {
     }
 }
 
-/// iOS 14-compatible date formatting helper.
+// MARK: - Helpers
+
 private func formatDate(_ date: Date) -> String {
     let formatter = DateFormatter()
     formatter.dateFormat = "yy/MM/dd HH:mm"
     return formatter.string(from: date)
 }
 
-/// iOS 14-compatible text selection modifier.
 struct SelectableTextModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 15.0, *) {
