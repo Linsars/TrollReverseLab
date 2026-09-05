@@ -160,41 +160,8 @@ jobs:
             --disable-pututline --disable-pututxline \
             --disable-loginfunc --disable-shadow --disable-plugin \
             ac_cv_file__dev_urandom=yes
-          # iOS patch: /etc/passwd points mobile to /bin/sh which does NOT exist on iOS.
-          # Fallback chain: passwd shell (if executable) -> bootstrap sh -> zsh -> sh.
-          python3 - <<'PYEOF'
-import re
-p = "src/common-session.c"
-s = open(p).read()
-old = """const char* get_user_shell() {
-	/* an empty shell should be interpreted as "/bin/sh" */
-	if (ses.authstate.pw_shell[0] == '\\0') {
-		return "/bin/sh";
-	} else {
-		return ses.authstate.pw_shell;
-	}
-}"""
-new = """const char* get_user_shell() {
-	/* iOS: passwd shell (/bin/sh) may not exist. Pick the first executable shell. */
-	static const char* candidates[] = { NULL, "/var/jb/bin/sh", "/var/jb/bin/zsh", "/bin/sh", NULL };
-	static char shellbuf[256];
-	if (ses.authstate.pw_shell[0] != '\\0') {
-		candidates[0] = ses.authstate.pw_shell;
-	} else {
-		candidates[0] = "/bin/sh";
-	}
-	for (int i = 0; candidates[i]; i++) {
-		if (access(candidates[i], X_OK) == 0) {
-			strlcpy(shellbuf, candidates[i], sizeof(shellbuf));
-			return shellbuf;
-		}
-	}
-	return "/bin/sh";
-}"""
-assert old in s, "anchor not found in common-session.c"
-open(p, "w").write(s.replace(old, new))
-print("patched get_user_shell OK")
-PYEOF
+          # iOS patch: passwd shell /bin/sh doesn't exist on iOS; probe fallback chain.
+          python3 "$GITHUB_WORKSPACE/scripts/patch_dropbear_shell.py" src/common-session.c
           make -j4 dropbear dropbearkey scp
           mkdir -p "$GITHUB_WORKSPACE/VendorBuilt"
           cp dropbear dropbearkey scp "$GITHUB_WORKSPACE/VendorBuilt/"
