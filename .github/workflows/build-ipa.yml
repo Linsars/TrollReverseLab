@@ -161,7 +161,7 @@ jobs:
             --disable-loginfunc --disable-shadow --disable-plugin \
             ac_cv_file__dev_urandom=yes
           # iOS patch: passwd shell /bin/sh doesn't exist on iOS; probe fallback chain.
-          python3 "$GITHUB_WORKSPACE/scripts/patch_dropbear_shell.py" src/common-session.c
+          python3 "$GITHUB_WORKSPACE/scripts/patch_dropbear_shell.py" .
           make -j4 dropbear dropbearkey scp
           mkdir -p "$GITHUB_WORKSPACE/VendorBuilt"
           cp dropbear dropbearkey scp "$GITHUB_WORKSPACE/VendorBuilt/"
