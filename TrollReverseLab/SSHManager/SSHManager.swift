@@ -9,6 +9,7 @@ public class SSHManager: ObservableObject {
     @Published public private(set) var binaryPath: String = "未找到"
     @Published public private(set) var lanIP: String = "获取中"
     @Published public private(set) var runningPids: [pid_t] = []
+    @Published public private(set) var lastLogTail: String = ""
 
     // MARK: - 路径
 
@@ -38,10 +39,13 @@ public class SSHManager: ObservableObject {
         guard sysctl(&mib, 2, nil, &size, nil, 0) == 0, size > 0 else { return [] }
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
         guard sysctl(&mib, 2, &procs, &size, nil, 0) == 0 else { return [] }
-        return procs
-            .map { $0.kp_proc }
-            .filter { $0.p_stat != 0 && String(cString: $0.p_comm) == "dropbear" }
-            .map { $0.p_pid }
+        return procs.compactMap { entry -> pid_t? in
+            guard entry.kp_proc.p_stat != 0 else { return nil }
+            let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
+                String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
+            return comm == "dropbear" ? entry.kp_proc.p_pid : nil
+        }
     }
 
     // MARK: - 启动
@@ -76,7 +80,7 @@ public class SSHManager: ObservableObject {
             }
 
             // 主机密钥（首次自动生成）
-            if !FileManager.default.fileExists(atPath: hostKeyPath) {
+            if !FileManager.default.fileExists(atPath: self.hostKeyPath) {
                 let keygen = Self.bundledSSHDir + "/dropbearkey"
                 guard FileManager.default.isExecutableFile(atPath: keygen) else {
                     DispatchQueue.main.async {
@@ -85,11 +89,11 @@ public class SSHManager: ObservableObject {
                     }
                     return
                 }
-                var rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", hostKeyPath])
+                var rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", self.hostKeyPath])
                 if (rc >> 8) != 0 {
-                    rc = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", hostKeyPath])
+                    rc = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", self.hostKeyPath])
                 }
-                guard FileManager.default.fileExists(atPath: hostKeyPath) else {
+                guard FileManager.default.fileExists(atPath: self.hostKeyPath) else {
                     DispatchQueue.main.async {
                         self.isRunning = false
                         self.status = "主机密钥生成失败 (keygen status \(rc))"
@@ -106,8 +110,8 @@ public class SSHManager: ObservableObject {
             var pid: pid_t = 0
             let argv: [UnsafeMutablePointer<CChar>?] = [
                 strdup(binary),
-                strdup("-p"), strdup(String(port)),
-                strdup("-r"), strdup(hostKeyPath),
+                strdup("-p"), strdup(String(self.port)),
+                strdup("-r"), strdup(self.hostKeyPath),
                 strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
                 strdup("-w"),                                   // 禁 root 登录
                 nil
@@ -189,6 +193,18 @@ public class SSHManager: ObservableObject {
     private func stopMonitor() {
         monitorTimer?.cancel()
         monitorTimer = nil
+    }
+
+    // MARK: - 日志（daemonize 模式无文件日志，保留接口读旧路径）
+
+    public func refreshLogTail() {
+        let dir = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+        if let s = try? String(contentsOfFile: dir + "/ssh_server.log", encoding: .utf8) {
+            let lines = s.components(separatedBy: "\n").filter { !$0.isEmpty }
+            lastLogTail = lines.suffix(5).joined(separator: "\n")
+        } else {
+            lastLogTail = ""
+        }
     }
 
     // MARK: - 公钥管理
