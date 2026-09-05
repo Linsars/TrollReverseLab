@@ -8,10 +8,7 @@ public class SSHManager: ObservableObject {
     @Published public private(set) var status: String = "未启动"
     @Published public private(set) var binaryPath: String = "未找到"
     @Published public private(set) var lanIP: String = "获取中"
-    @Published public private(set) var lastLogTail: String = ""
-
-    private var serverPid: pid_t = 0
-    private var monitorTimer: DispatchSourceTimer?
+    @Published public private(set) var runningPids: [pid_t] = []
 
     // MARK: - 路径
 
@@ -27,43 +24,49 @@ public class SSHManager: ObservableObject {
         return dir + "/ssh_host_key"
     }
 
-    private var logPath: String {
-        let dir = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
-        return dir + "/ssh_server.log"
-    }
-
     /// dropbear 从这里读登录用户的公钥（当前用户 = mobile）
     public static var authorizedKeysPath: String {
         "/var/mobile/.ssh/authorized_keys"
     }
 
-    // MARK: - 二进制候选（按序尝试）
+    // MARK: - 事实查询（Filza 模式：状态 = 进程列表，不靠记忆）
 
-    private var candidateBinaries: [(path: String, kind: ServerKind)] {
-        var list: [(String, ServerKind)] = []
-        let bd = Self.bundledSSHDir
-        list.append((bd + "/dropbear", .dropbear))
-        list.append((bd + "/sshd", .openssh))
-        list.append(("/var/jb/usr/sbin/dropbear", .dropbear))   // 越狱 bootstrap 存在时的捷径
-        return list.filter { FileManager.default.isExecutableFile(atPath: $0.0) }
-    }
-
-    public enum ServerKind {
-        case dropbear
-        case openssh
+    /// sysctl 扫进程表找 dropbear（p_comm 16 字节足够区分，设备上没有第二个 dropbear）
+    public static func findDropbearPids() -> [pid_t] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
+        var size = 0
+        guard sysctl(&mib, 2, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, 2, &procs, &size, nil, 0) == 0 else { return [] }
+        return procs
+            .map { $0.kp_proc }
+            .filter { $0.p_stat != 0 && String(cString: $0.p_comm) == "dropbear" }
+            .map { $0.p_pid }
     }
 
     // MARK: - 启动
 
     public func start() {
-        guard !isRunning else { return }
-
         DispatchQueue.global(qos: .userInitiated).async {
-            // 局域网 IP
             let ip = Self.primaryLanIP()
             DispatchQueue.main.async { self.lanIP = ip ?? "无 Wi-Fi 地址" }
 
-            guard let (binary, kind) = self.candidateBinaries.first else {
+            // 事实查询：已有实例就直接接管显示
+            let existing = Self.findDropbearPids()
+            if !existing.isEmpty {
+                DispatchQueue.main.async {
+                    self.isRunning = true
+                    self.runningPids = existing
+                    self.status = "运行中（已有实例）· 端口 \(self.port) · pid \(existing.map(String.init).joined(separator: ","))"
+                }
+                self.startMonitor()
+                return
+            }
+
+            guard let binary = [
+                Self.bundledSSHDir + "/dropbear",
+                "/var/jb/usr/sbin/dropbear"
+            ].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
                 DispatchQueue.main.async {
                     self.isRunning = false
                     self.binaryPath = "未找到"
@@ -72,127 +75,120 @@ public class SSHManager: ObservableObject {
                 return
             }
 
-            switch kind {
-            case .dropbear:
-                self.startDropbear(binary)
-            case .openssh:
-                self.startOpenSSH(binary)
+            // 主机密钥（首次自动生成）
+            if !FileManager.default.fileExists(atPath: hostKeyPath) {
+                let keygen = Self.bundledSSHDir + "/dropbearkey"
+                guard FileManager.default.isExecutableFile(atPath: keygen) else {
+                    DispatchQueue.main.async {
+                        self.isRunning = false
+                        self.status = "缺 dropbearkey，无法生成主机密钥"
+                    }
+                    return
+                }
+                var rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", hostKeyPath])
+                if (rc >> 8) != 0 {
+                    rc = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", hostKeyPath])
+                }
+                guard FileManager.default.fileExists(atPath: hostKeyPath) else {
+                    DispatchQueue.main.async {
+                        self.isRunning = false
+                        self.status = "主机密钥生成失败 (keygen status \(rc))"
+                    }
+                    return
+                }
             }
-        }
-    }
 
-    /// dropbear：非 root 可跑（生态验证过的纯巨魔方案）
-    private func startDropbear(_ binary: String) {
-        // 1. 主机密钥（首次自动生成）
-        if !FileManager.default.fileExists(atPath: hostKeyPath) {
-            let keygen = Self.bundledSSHDir + "/dropbearkey"
-            guard FileManager.default.isExecutableFile(atPath: keygen) else {
+            // PATH 注入捆绑目录（scp 会话用）
+            let env = Self.environWithPrependedPATH(Self.bundledSSHDir)
+
+            // daemonize 模式（不带 -F）：dropbear 自行 fork 后台，父 pid 立即退出，
+            // 孤儿进程被 launchd 收养 —— app 被杀服务照跑，Filza WebDAV 同款体验
+            var pid: pid_t = 0
+            let argv: [UnsafeMutablePointer<CChar>?] = [
+                strdup(binary),
+                strdup("-p"), strdup(String(port)),
+                strdup("-r"), strdup(hostKeyPath),
+                strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
+                strdup("-w"),                                   // 禁 root 登录
+                nil
+            ]
+            defer { for p in argv { free(p) } }
+
+            let rc = posix_spawn(&pid, binary, nil, nil, argv, env)
+            guard rc == 0 else {
                 DispatchQueue.main.async {
                     self.isRunning = false
-                    self.status = "缺 dropbearkey，无法生成主机密钥"
+                    self.status = "posix_spawn 失败 errno=\(rc)"
                 }
                 return
             }
-            var rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", hostKeyPath])
-            if (rc >> 8) != 0 {
-                rc = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", hostKeyPath])
-            }
-            guard FileManager.default.fileExists(atPath: hostKeyPath) else {
+
+            // 收尸 daemonize 的短命父进程
+            var st: Int32 = 0
+            waitpid(pid, &st, 0)
+
+            // 0.8s 后扫进程表确认新实例真的起来了（bind 失败等会在这里现形）
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
+                let pids = Self.findDropbearPids()
                 DispatchQueue.main.async {
-                    self.isRunning = false
-                    self.status = "主机密钥生成失败 (keygen status \(rc))"
+                    if pids.isEmpty {
+                        self.isRunning = false
+                        self.runningPids = []
+                        self.status = "启动失败：进程未存活（端口被占或密钥无效）"
+                    } else {
+                        self.isRunning = true
+                        self.runningPids = pids
+                        self.binaryPath = binary
+                        self.status = "运行中 · 端口 \(self.port) · pid \(pids.map(String.init).joined(separator: ","))"
+                    }
                 }
-                return
             }
-        }
-
-        // 2. PATH 注入捆绑目录（scp 会话要用）
-        let env = Self.environWithPrependedPATH(Self.bundledSSHDir)
-
-        var pid: pid_t = 0
-        let argv: [UnsafeMutablePointer<CChar>?] = [
-            strdup(binary),
-            strdup("-F"),                                   // 前台
-            strdup("-p"), strdup(String(port)),
-            strdup("-r"), strdup(hostKeyPath),
-            strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
-            strdup("-w"),                                   // 禁 root 登录
-            nil
-        ]
-        defer { for p in argv { free(p) } }
-
-        // 注：不用 -E（部分路径上 EINVAL 早退），改用 file_actions 把 stderr 重定向到日志文件
-        var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        let logFD = open(logPath, O_WRONLY | O_CREAT | O_APPEND, 0o644)
-        if logFD >= 0 {
-            posix_spawn_file_actions_adddup2(&actions, logFD, STDOUT_FILENO)
-            posix_spawn_file_actions_adddup2(&actions, logFD, STDERR_FILENO)
-        }
-
-        var attrs: posix_spawnattr_t?
-        posix_spawnattr_init(&attrs)
-        let rc = posix_spawn(&pid, binary, &actions, &attrs, argv, env)
-        posix_spawnattr_destroy(&attrs)
-        posix_spawn_file_actions_destroy(&actions)
-        if logFD >= 0 { close(logFD) }
-
-        handleSpawnResult(rc: rc, pid: pid, binary: binary, name: "dropbear")
-    }
-
-    /// OpenSSH sshd：可能因 privilege separation 在非 root 下拒绝，失败时状态区给真实错误
-    private func startOpenSSH(_ binary: String) {
-        var pid: pid_t = 0
-        let argv: [UnsafeMutablePointer<CChar>?] = [
-            strdup(binary),
-            strdup("-D"),
-            strdup("-E"), strdup(logPath),
-            strdup("-p"), strdup(String(port)),
-            strdup("-h"), strdup(hostKeyPath),
-            strdup("-o"), strdup("UsePAM no"),
-            strdup("-o"), strdup("Subsystem=sftp internal-sftp"),
-            nil
-        ]
-        defer { for p in argv { free(p) } }
-
-        let rc = posix_spawn(&pid, binary, nil, nil, argv, environ)
-        handleSpawnResult(rc: rc, pid: pid, binary: binary, name: "sshd")
-    }
-
-    private func handleSpawnResult(rc: Int32, pid: pid_t, binary: String, name: String) {
-        DispatchQueue.main.async {
-            if rc == 0 {
-                self.serverPid = pid
-                self.isRunning = true
-                self.binaryPath = binary
-                self.status = "\(name) 运行中 · 端口 \(self.port) · pid \(pid)"
-                self.startMonitor()
-            } else {
-                self.isRunning = false
-                self.status = "\(name) posix_spawn 失败 errno=\(rc)"
-                self.refreshLogTail()
+            DispatchQueue.main.async {
+                self.status = "正在启动…"
             }
         }
     }
 
     public func stop() {
-        let pid = serverPid
-        serverPid = 0
-        stopMonitor()
-        isRunning = false
-        status = "已停止"
-
-        guard pid > 0 else { return }
-        kill(pid, SIGTERM)
-        // 1.5s 内没退就升级 SIGKILL，并确保 reap（不留僵尸）
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-            var st: Int32 = 0
-            if waitpid(pid, &st, WNOHANG) == 0 {
-                kill(pid, SIGKILL)
-                var st2: Int32 = 0
-                waitpid(pid, &st2, 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let pids = Self.findDropbearPids()
+            for p in pids { kill(p, SIGTERM) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+                let survivors = Self.findDropbearPids()
+                for p in survivors { kill(p, SIGKILL) }
+            }
+            DispatchQueue.main.async {
+                self.isRunning = false
+                self.runningPids = []
+                self.status = pids.isEmpty ? "已停止（本无实例）" : "已停止（终止 pid \(pids.map(String.init).joined(separator: ","))）"
             }
         }
+    }
+
+    // MARK: - 状态轮询（纯事实刷新，永不误报）
+
+    private var monitorTimer: DispatchSourceTimer?
+
+    private func startMonitor() {
+        stopMonitor()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            let pids = Self.findDropbearPids()
+            self.runningPids = pids
+            self.isRunning = !pids.isEmpty
+            if pids.isEmpty && self.status.hasPrefix("运行中") {
+                self.status = "进程已消失"
+            }
+        }
+        timer.resume()
+        monitorTimer = timer
+    }
+
+    private func stopMonitor() {
+        monitorTimer?.cancel()
+        monitorTimer = nil
     }
 
     // MARK: - 公钥管理
@@ -226,42 +222,6 @@ public class SSHManager: ObservableObject {
 
     public func readAuthorizedKeys() -> String {
         return (try? String(contentsOfFile: Self.authorizedKeysPath, encoding: .utf8)) ?? ""
-    }
-
-    // MARK: - 存活监控
-
-    private func startMonitor() {
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
-        timer.setEventHandler { [weak self] in
-            guard let self = self, self.serverPid > 0 else { return }
-            // WNOHANG 探测 + 顺手 reap（防止僵尸进程被 kill(pid,0) 误判存活）
-            var st: Int32 = 0
-            let r = waitpid(self.serverPid, &st, WNOHANG)
-            if r == self.serverPid {
-                self.refreshLogTail()
-                self.stopMonitor()
-                self.serverPid = 0
-                self.isRunning = false
-                self.status = "进程已退出 (code \(st >> 8))"
-            }
-        }
-        timer.resume()
-        monitorTimer = timer
-    }
-
-    private func stopMonitor() {
-        monitorTimer?.cancel()
-        monitorTimer = nil
-    }
-
-    public func refreshLogTail() {
-        if let s = try? String(contentsOfFile: logPath, encoding: .utf8) {
-            let lines = s.components(separatedBy: "\n").filter { !$0.isEmpty }
-            lastLogTail = lines.suffix(5).joined(separator: "\n")
-        } else {
-            lastLogTail = ""
-        }
     }
 
     // MARK: - 工具
@@ -315,5 +275,21 @@ public class SSHManager: ObservableObject {
             ptr = p.pointee.ifa_next
         }
         return result
+    }
+
+    // MARK: - 初始化即拉取真实状态
+
+    public init() {
+        // 构造后延迟一拍查一次（避免阻塞主线程）
+        DispatchQueue.global().async { [weak self] in
+            let pids = Self.findDropbearPids()
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.runningPids = pids
+                self.isRunning = !pids.isEmpty
+                self.status = pids.isEmpty ? "未启动" : "运行中（已有实例）· pid \(pids.map(String.init).joined(separator: ","))"
+                if !pids.isEmpty { self.startMonitor() }
+            }
+        }
     }
 }

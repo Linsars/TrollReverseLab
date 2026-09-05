@@ -64,6 +64,14 @@ struct SSHManagerView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                if !ssh.runningPids.isEmpty {
+                    HStack {
+                        Text("进程").foregroundColor(.secondary)
+                        Spacer()
+                        Text(ssh.runningPids.map(String.init).joined(separator: ", "))
+                            .font(.system(.caption2, design: .monospaced))
+                    }
+                }
             }
 
             // MARK: 公钥
