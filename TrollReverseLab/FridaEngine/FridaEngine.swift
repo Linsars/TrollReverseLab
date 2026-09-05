@@ -71,6 +71,9 @@ public final class FridaEngine: ObservableObject {
 
     @Published public var selectedTargetApp: TrollStoreApp?
 
+    private var currentProcess: LocalProcess?
+    private var bridge: FridaBridge?
+
     public init() {}
 
     // MARK: - Process Management (from Material 3)
