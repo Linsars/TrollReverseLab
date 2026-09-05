@@ -145,9 +145,12 @@ jobs:
 
       - name: Build dropbear for iOS arm64
         run: |
-          curl -sL https://github.com/mkj/dropbear/releases/download/DROPBEAR_2024.86/dropbear-2024.86.tar.bz2 -o /tmp/dropbear.tar.bz2
+          set -e
+          DB_VER="2025.88"
+          curl -fL "https://matt.ucc.asn.au/dropbear/releases/dropbear-${DB_VER}.tar.bz2" -o /tmp/dropbear.tar.bz2
+          file /tmp/dropbear.tar.bz2 | grep -q bzip2 || { echo "::error::下载的不是 tar.bz2"; head -c 300 /tmp/dropbear.tar.bz2; exit 1; }
           tar xjf /tmp/dropbear.tar.bz2 -C /tmp
-          cd /tmp/dropbear-2024.86
+          cd /tmp/dropbear-${DB_VER}
           export CC="xcrun -sdk iphoneos clang"
           export CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -Os"
           export LDFLAGS="-arch arm64 -miphoneos-version-min=14.0"
