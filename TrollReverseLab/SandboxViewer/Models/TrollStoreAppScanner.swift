@@ -491,7 +491,7 @@ public final class TrollStoreAppScanner {
             dataContainerPath: dataContainerPath,
             installDate: installDate,
             appSize: appSize,
-            isTrollStore: true,
+            isTrollStore: marker != "all",   // "all" = 全量模式下的非巨魔应用
             markerType: marker
         )
     }
