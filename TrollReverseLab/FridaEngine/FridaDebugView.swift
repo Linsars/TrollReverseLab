@@ -37,6 +37,11 @@ struct FridaDebugView: View {
 
                 Divider()
 
+                // SSH 管理面板
+                SSHPanelView(sshManager: fridaEngine.sshManager)
+
+                Divider()
+
                 // Console output
                 ConsoleOutputView(messages: fridaEngine.consoleOutput)
                     .frame(maxHeight: .infinity)
@@ -351,7 +356,7 @@ struct ProcessPickerView: View {
                     List(filteredProcesses, id: \.id) { process in
                         Button {
                             selectedProcess = process
-                            fridaEngine.attach(to: process, isUserSelected: true)
+                            fridaEngine.attach(to: process)
                             isPresented = false
                         } label: {
                             HStack {

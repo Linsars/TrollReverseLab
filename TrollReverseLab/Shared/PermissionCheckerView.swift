@@ -162,7 +162,7 @@ struct PermissionCheckerView: View {
                 HStack {
                     Text("版本")
                     Spacer()
-                    Text("6.1.1").foregroundColor(.secondary)
+                    Text("6.2.0").foregroundColor(.secondary)
                 }
                 HStack {
                     Text("适用环境")

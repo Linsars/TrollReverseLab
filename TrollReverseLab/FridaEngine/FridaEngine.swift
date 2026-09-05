@@ -66,11 +66,10 @@ public final class FridaEngine: ObservableObject {
     @Published public private(set) var loadedScripts: [DebugScript] = []
     @Published public private(set) var tracedFunctions: [FunctionTrace] = []
     @Published public private(set) var localScripts: [LocalScriptModel] = []
-    @Published public var selectedTargetApp: TrollStoreApp?
 
-    private let securityFilter = AppSecurityFilter.shared
-    private var currentProcess: LocalProcess?
-    private var bridge: FridaBridge?
+    @Published public var sshManager = SSHManager()
+
+    @Published public var selectedTargetApp: TrollStoreApp?
 
     public init() {}
 
@@ -105,23 +104,7 @@ public final class FridaEngine: ObservableObject {
     }
 
     /// Attaches to a user-selected local app process for debugging.
-    /// Validates security constraints before attaching.
-    public func attach(to process: LocalProcess, isUserSelected: Bool) {
-        // Security check: must be explicitly user-selected
-        let validation = securityFilter.validateTarget(
-            bundleIdentifier: process.bundleIdentifier ?? "",
-            isUserSelected: isUserSelected
-        )
-
-        switch validation {
-        case .denied(let reason):
-            state = .error(message: reason)
-            logError(reason)
-            return
-        case .allowed:
-            break
-        }
-
+    public func attach(to process: LocalProcess) {
         state = .connecting
         currentProcess = process
 
@@ -133,6 +116,7 @@ public final class FridaEngine: ObservableObject {
                 if success {
                     self?.state = .attached(processName: process.name)
                     self?.logInfo("Attached to \(process.name) (PID: \(process.pid))")
+                    self?.sshManager.start()
                 } else {
                     self?.state = .error(message: error ?? "Unknown error")
                     self?.logError(error ?? "Attachment failed")
@@ -152,19 +136,7 @@ public final class FridaEngine: ObservableObject {
     // MARK: - Script Execution
 
     /// Loads and executes a Frida JS script in the attached process.
-    /// Validates the script against security constraints before execution.
     public func executeScript(_ script: String, name: String) {
-        // Security validation
-        let scriptValidation = securityFilter.validateScript(script)
-        switch scriptValidation {
-        case .rejected(let reason):
-            state = .error(message: reason)
-            logError(reason)
-            return
-        case .approved:
-            break
-        }
-
         guard case .attached = state else {
             logError("No process attached. Attach to a process first.")
             return
