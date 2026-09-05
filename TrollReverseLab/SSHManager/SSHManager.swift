@@ -86,11 +86,23 @@ public class SSHManager: ObservableObject {
         // 1. 主机密钥（首次自动生成）
         if !FileManager.default.fileExists(atPath: hostKeyPath) {
             let keygen = Self.bundledSSHDir + "/dropbearkey"
-            if FileManager.default.isExecutableFile(atPath: keygen) {
-                let rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", hostKeyPath])
-                if rc != 0 {
-                    _ = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", hostKeyPath])
+            guard FileManager.default.isExecutableFile(atPath: keygen) else {
+                DispatchQueue.main.async {
+                    self.isRunning = false
+                    self.status = "缺 dropbearkey，无法生成主机密钥"
                 }
+                return
+            }
+            var rc = Self.spawnSync(keygen, args: ["-t", "ed25519", "-f", hostKeyPath])
+            if (rc >> 8) != 0 {
+                rc = Self.spawnSync(keygen, args: ["-t", "rsa", "-s", "2048", "-f", hostKeyPath])
+            }
+            guard FileManager.default.fileExists(atPath: hostKeyPath) else {
+                DispatchQueue.main.async {
+                    self.isRunning = false
+                    self.status = "主机密钥生成失败 (keygen status \(rc))"
+                }
+                return
             }
         }
 
@@ -101,7 +113,6 @@ public class SSHManager: ObservableObject {
         let argv: [UnsafeMutablePointer<CChar>?] = [
             strdup(binary),
             strdup("-F"),                                   // 前台
-            strdup("-E"), strdup(logPath),                  // 日志到 stderr+文件
             strdup("-p"), strdup(String(port)),
             strdup("-r"), strdup(hostKeyPath),
             strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
@@ -110,10 +121,21 @@ public class SSHManager: ObservableObject {
         ]
         defer { for p in argv { free(p) } }
 
+        // 注：不用 -E（部分路径上 EINVAL 早退），改用 file_actions 把 stderr 重定向到日志文件
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        let logFD = open(logPath, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+        if logFD >= 0 {
+            posix_spawn_file_actions_adddup2(&actions, logFD, STDOUT_FILENO)
+            posix_spawn_file_actions_adddup2(&actions, logFD, STDERR_FILENO)
+        }
+
         var attrs: posix_spawnattr_t?
         posix_spawnattr_init(&attrs)
-        let rc = posix_spawn(&pid, binary, nil, &attrs, argv, env)
+        let rc = posix_spawn(&pid, binary, &actions, &attrs, argv, env)
         posix_spawnattr_destroy(&attrs)
+        posix_spawn_file_actions_destroy(&actions)
+        if logFD >= 0 { close(logFD) }
 
         handleSpawnResult(rc: rc, pid: pid, binary: binary, name: "dropbear")
     }

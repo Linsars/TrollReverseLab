@@ -20,12 +20,16 @@ public final class AppScannerViewModel: ObservableObject {
 
     private let scanner = TrollStoreAppScanner()
     private var hasLoadedCache = false
+    /// false = 仅巨魔应用（旧行为）；true = 全部已安装应用（App Store/侧载一律列出）
+    @Published public var showAllApps: Bool = UserDefaults.standard.object(forKey: "sandboxShowAllApps") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showAllApps, forKey: "sandboxShowAllApps") }
+    }
 
     /// Loads cached apps immediately (called on first appear).
     public func loadCache() {
         guard !hasLoadedCache else { return }
         hasLoadedCache = true
-        let cachedApps = TrollStoreAppCache.shared.loadCachedApps()
+        let cachedApps = TrollStoreAppCache.shared.loadCachedApps().filter { showAllApps || $0.isTrollStore }
         self.apps = cachedApps
         self.diagnostics = TrollStoreAppCache.shared.loadCachedDiagnostics()
     }
@@ -36,6 +40,7 @@ public final class AppScannerViewModel: ObservableObject {
         isScanning = true
         permissionError = nil
 
+        scanner.includeAllApps = showAllApps
         scanner.scanTrollStoreAppsAsync { [weak self] found, diag in
             guard let self = self else { return }
             self.apps = found
@@ -43,6 +48,12 @@ public final class AppScannerViewModel: ObservableObject {
             self.permissionError = diag.permissionError
             self.isScanning = false
         }
+    }
+
+    /// Toggle 切换后重扫。
+    public func rescanForModeChange() {
+        TrollStoreAppCache.shared.saveCachedApps([])  // 清缓存防止旧模式结果残留
+        scan()
     }
 }
 
@@ -80,7 +91,7 @@ struct AppListView: View {
                     appListView
                 }
             }
-            .navigationTitle("TrollStore 应用")
+            .navigationTitle("应用沙盒")
             .navigationBarItems(
                 trailing: HStack {
                     if !scanner.apps.isEmpty {
@@ -97,6 +108,27 @@ struct AppListView: View {
                     }
                 }
             )
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Picker("范围", selection: Binding(
+                        get: { scanner.showAllApps },
+                        set: { newValue in
+                            scanner.showAllApps = newValue
+                            scanner.rescanForModeChange()
+                        }
+                    )) {
+                        Text("全部应用").tag(true)
+                        Text("仅巨魔").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 200)
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color(UIColor.systemBackground))
+            }
             .onAppear {
                 scanner.loadCache()
                 if !scanner.isScanning {
@@ -128,7 +160,7 @@ struct AppListView: View {
 
     private var appListView: some View {
         List {
-            Section(header: Text("TrollStore 应用 (\(scanner.apps.count))")) {
+            Section(header: Text(scanner.showAllApps ? "全部应用 (\(scanner.apps.count))" : "TrollStore 应用 (\(scanner.apps.count))")) {
                 ForEach(scanner.apps) { app in
                     NavigationLink(destination: SandboxBrowserView(app: app)) {
                         AppRowView(app: app)
@@ -157,6 +189,14 @@ struct AppRowView: View {
                     .fontWeight(.medium)
 
                 HStack(spacing: 8) {
+                    if app.isTrollStore {
+                        Text("TS")
+                            .font(.system(.caption2, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
+                    }
                     Text("v\(app.version)")
                         .font(.caption)
                         .foregroundColor(.secondary)

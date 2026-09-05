@@ -250,6 +250,8 @@ public final class TrollStoreAppScanner {
 
     private let fileManager = FileManager.default
     public private(set) var diagnostics = ScanDiagnostics()
+    /// true = 全量模式：不做 TrollStore marker 过滤、不剔 Apple 应用
+    public var includeAllApps: Bool = false
 
     public init() {}
 
@@ -348,21 +350,26 @@ public final class TrollStoreAppScanner {
 
                 let dirPath = dir.path
                 let marker = self.firstExistingMarker(in: dirPath, markers: self.trollStoreMarkers)
-                guard !marker.isEmpty else { return }
 
-                lock.lock()
-                self.diagnostics.markerFilesFound += 1
-                lock.unlock()
+                // 全量模式：无 marker 也进列表（markerType 标 "all"）
+                if marker.isEmpty && !self.includeAllApps { return }
 
-                // Exclude TrollStore / TrollStoreLite own containers.
-                if self.isTrollStoreOwnContainer(dirPath) {
+                if !marker.isEmpty {
+                    lock.lock()
+                    self.diagnostics.markerFilesFound += 1
+                    lock.unlock()
+                }
+
+                // 全量模式下不排除 TrollStore 自身容器
+                if !self.includeAllApps && self.isTrollStoreOwnContainer(dirPath) {
                     lock.lock()
                     self.diagnostics.skippedContainers += 1
                     lock.unlock()
                     return
                 }
 
-                if let app = self.parseBundleContainer(dir, marker: marker, dataContainerMap: dataContainerMap) {
+                let effectiveMarker = marker.isEmpty ? "all" : marker
+                if let app = self.parseBundleContainer(dir, marker: effectiveMarker, dataContainerMap: dataContainerMap) {
                     lock.lock()
                     results.append(app)
                     self.diagnostics.trollStoreApps += 1
@@ -465,8 +472,8 @@ public final class TrollStoreAppScanner {
             ?? infoPlist?["CFBundleVersion"] as? String
             ?? "1.0"
 
-        // Skip Apple system apps (TrollStore should never install these, but be safe).
-        if bundleId.hasPrefix("com.apple.") { return nil }
+        // Skip Apple system apps only in TrollStore-only mode.
+        if !includeAllApps && bundleId.hasPrefix("com.apple.") { return nil }
 
         // Locate the matching data container.
         let dataContainerPath = dataContainerMap[bundleId] ?? ""

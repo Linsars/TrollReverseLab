@@ -6,6 +6,7 @@ struct SSHManagerView: View {
     @ObservedObject var ssh: SSHManager
     @State private var publicKeyInput = ""
     @State private var installMessage = ""
+    @State private var portText: String = ""
 
     var body: some View {
         Form {
@@ -34,7 +35,15 @@ struct SSHManagerView: View {
                 HStack {
                     Text("端口").foregroundColor(.secondary)
                     Spacer()
-                    TextField("端口", value: $ssh.port, formatter: NumberFormatter())
+                    TextField("端口", text: $portText, onEditingChanged: { editing in
+                        if !editing {
+                            if let p = Int(portText), (1...65535).contains(p) {
+                                ssh.port = p
+                            } else {
+                                portText = String(ssh.port)
+                            }
+                        }
+                    })
                         .font(.system(.caption, design: .monospaced))
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
@@ -46,6 +55,7 @@ struct SSHManagerView: View {
                     Text("mobile@\(ssh.lanIP) -p \(ssh.port)")
                         .font(.system(.caption, design: .monospaced))
                 }
+                .onTapGesture { portText = String(ssh.port) }
                 HStack {
                     Text("二进制").foregroundColor(.secondary)
                     Spacer()
@@ -97,6 +107,9 @@ struct SSHManagerView: View {
             }
         }
         .navigationTitle("SSH 管理")
-        .onAppear { ssh.refreshLogTail() }
+        .onAppear {
+            portText = String(ssh.port)
+            ssh.refreshLogTail()
+        }
     }
 }
