@@ -143,6 +143,39 @@ jobs:
           fi
           echo "✅ Key entitlements verified successfully."
 
+      - name: Build dropbear for iOS arm64
+        run: |
+          curl -sL https://github.com/mkj/dropbear/releases/download/DROPBEAR_2024.86/dropbear-2024.86.tar.bz2 -o /tmp/dropbear.tar.bz2
+          tar xjf /tmp/dropbear.tar.bz2 -C /tmp
+          cd /tmp/dropbear-2024.86
+          export CC="xcrun -sdk iphoneos clang"
+          export CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -Os"
+          export LDFLAGS="-arch arm64 -miphoneos-version-min=14.0"
+          ./configure --host=arm-apple-darwin \
+            --disable-zlib --disable-largefile \
+            --disable-lastlog --disable-utmp --disable-utmpx --disable-wtmp --disable-wtmpx \
+            --disable-pututline --disable-pututxline \
+            --disable-loginfunc --disable-shadow --disable-plugin \
+            ac_cv_file__dev_urandom=yes
+          make -j4 dropbear dropbearkey scp
+          mkdir -p "$GITHUB_WORKSPACE/VendorBuilt"
+          cp dropbear dropbearkey scp "$GITHUB_WORKSPACE/VendorBuilt/"
+          file "$GITHUB_WORKSPACE/VendorBuilt/dropbear"
+
+      - name: Bundle SSH binaries into app
+        run: |
+          mkdir -p "$APP_PATH/ssh"
+          cp VendorBuilt/dropbear VendorBuilt/dropbearkey VendorBuilt/scp "$APP_PATH/ssh/"
+          cp Vendor/sshd "$APP_PATH/ssh/" 2>/dev/null || true
+          chmod +x "$APP_PATH/ssh"/*
+          ENT="$GITHUB_WORKSPACE/TrollReverseLab/TrollReverseLab.entitlements"
+          for b in "$APP_PATH"/ssh/*; do
+            ldid -S"$ENT" "$b"
+          done
+          echo "SSH binaries bundled:"
+          ls -la "$APP_PATH/ssh"
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+
       - name: Package IPA
         run: |
           mkdir -p build/Payload

@@ -92,6 +92,11 @@ struct MoreView: View {
                     ToolCard(icon: "doc.on.doc.fill", title: "备份管理", subtitle: "应用数据备份", color: .green)
                 }
                 .buttonStyle(PlainButtonStyle())
+
+                NavigationLink(destination: SSHManagerView()) {
+                    ToolCard(icon: "terminal.fill", title: "SSH 管理", subtitle: "设备 SSH 服务", color: .red)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal)
         }
