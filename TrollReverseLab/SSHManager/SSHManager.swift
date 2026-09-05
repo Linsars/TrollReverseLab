@@ -108,12 +108,13 @@ public class SSHManager: ObservableObject {
             // PATH 注入捆绑目录（scp 会话用）
             let env = Self.environWithPrependedPATH(Self.bundledSSHDir)
 
-            // daemonize 等效方案：-F 前台（实测可靠，避开 daemon() 的不确定性）
-            // + POSIX_SPAWN_SETSID 让进程自立会话 —— app 被杀后变孤儿被 launchd 收养，服务照跑
+            // daemonize 模式：dropbear 自己 fork+setsid 成标准守护（全平台验证过的路径）
+            // 父进程秒退 → posix_spawn 干净返回；守护子进程被 launchd 收养，app 被杀服务照跑。
+            // 禁用 -F+SETSID：实测（v6.3.8/9）SETSID 实例会话不关闭（exec 输出后客户端挂尾不退出），
+            // 同一二进制无 SETSID 的手动实例 EXIT=0 干净退出 → 会话生命周期交还 dropbear 自己管理。
             var pid: pid_t = 0
             let argv: [UnsafeMutablePointer<CChar>?] = [
                 strdup(binary),
-                strdup("-F"),
                 strdup("-p"), strdup(String(self.port)),
                 strdup("-r"), strdup(self.hostKeyPath),
                 strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
@@ -122,11 +123,7 @@ public class SSHManager: ObservableObject {
             ]
             defer { for p in argv { free(p) } }
 
-            var attrs: posix_spawnattr_t?
-            posix_spawnattr_init(&attrs)
-            posix_spawnattr_setflags(&attrs, Int16(0x0400))     // POSIX_SPAWN_SETSID
-            let rc = posix_spawn(&pid, binary, nil, &attrs, argv, env)
-            posix_spawnattr_destroy(&attrs)
+            let rc = posix_spawn(&pid, binary, nil, nil, argv, env)
             guard rc == 0 else {
                 DispatchQueue.main.async {
                     self.isRunning = false
