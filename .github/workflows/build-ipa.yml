@@ -171,7 +171,6 @@ jobs:
         run: |
           mkdir -p "$APP_PATH/ssh"
           cp VendorBuilt/dropbear VendorBuilt/dropbearkey VendorBuilt/scp "$APP_PATH/ssh/"
-          cp Vendor/sshd "$APP_PATH/ssh/" 2>/dev/null || true
           chmod +x "$APP_PATH/ssh"/*
           ENT="$GITHUB_WORKSPACE/TrollReverseLab/TrollReverseLab.entitlements"
           for b in "$APP_PATH"/ssh/*; do
