@@ -3,11 +3,9 @@ import SwiftUI
 
 /// SSH 管理主界面：服务开关 / 状态 / 公钥管理 / 连接说明 / 日志。
 struct SSHManagerView: View {
-    @EnvironmentObject var fridaEngine: FridaEngine
+    @ObservedObject var ssh: SSHManager
     @State private var publicKeyInput = ""
     @State private var installMessage = ""
-
-    private var ssh: SSHManager { fridaEngine.sshManager }
 
     var body: some View {
         Form {
@@ -34,9 +32,18 @@ struct SSHManagerView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
                 HStack {
+                    Text("端口").foregroundColor(.secondary)
+                    Spacer()
+                    TextField("端口", value: $ssh.port, formatter: NumberFormatter())
+                        .font(.system(.caption, design: .monospaced))
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 90)
+                }
+                HStack {
                     Text("连接地址").foregroundColor(.secondary)
                     Spacer()
-                    Text("mobile@\(ssh.lanIP) -p 2222")
+                    Text("mobile@\(ssh.lanIP) -p \(ssh.port)")
                         .font(.system(.caption, design: .monospaced))
                 }
                 HStack {

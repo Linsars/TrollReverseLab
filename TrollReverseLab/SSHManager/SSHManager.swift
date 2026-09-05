@@ -4,7 +4,7 @@ import Darwin
 
 public class SSHManager: ObservableObject {
     @Published public private(set) var isRunning = false
-    @Published public var port: Int = 2222
+    @Published public var port: Int = 2233   // 默认避开越狱 sshd 常用的 22/2222
     @Published public private(set) var status: String = "未启动"
     @Published public private(set) var binaryPath: String = "未找到"
     @Published public private(set) var lanIP: String = "获取中"
@@ -154,11 +154,23 @@ public class SSHManager: ObservableObject {
     }
 
     public func stop() {
-        if serverPid > 0 { kill(serverPid, SIGTERM) }
-        stopMonitor()
+        let pid = serverPid
         serverPid = 0
+        stopMonitor()
         isRunning = false
         status = "已停止"
+
+        guard pid > 0 else { return }
+        kill(pid, SIGTERM)
+        // 1.5s 内没退就升级 SIGKILL，并确保 reap（不留僵尸）
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+            var st: Int32 = 0
+            if waitpid(pid, &st, WNOHANG) == 0 {
+                kill(pid, SIGKILL)
+                var st2: Int32 = 0
+                waitpid(pid, &st2, 0)
+            }
+        }
     }
 
     // MARK: - 公钥管理
@@ -201,12 +213,15 @@ public class SSHManager: ObservableObject {
         timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.serverPid > 0 else { return }
-            if kill(self.serverPid, 0) != 0 {
+            // WNOHANG 探测 + 顺手 reap（防止僵尸进程被 kill(pid,0) 误判存活）
+            var st: Int32 = 0
+            let r = waitpid(self.serverPid, &st, WNOHANG)
+            if r == self.serverPid {
                 self.refreshLogTail()
                 self.stopMonitor()
                 self.serverPid = 0
                 self.isRunning = false
-                self.status = "进程已退出 (pid 记录 \(self.lastLogTail.isEmpty ? "无日志" : "见日志")）"
+                self.status = "进程已退出 (code \(st >> 8))"
             }
         }
         timer.resume()

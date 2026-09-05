@@ -10,6 +10,8 @@
 import SwiftUI
 
 struct MoreView: View {
+    @EnvironmentObject var fridaEngine: FridaEngine
+
     // Two-column adaptive grid for tool cards.
     private let columns: [GridItem] = [
         GridItem(.flexible()),
@@ -93,7 +95,7 @@ struct MoreView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
 
-                NavigationLink(destination: SSHManagerView()) {
+                NavigationLink(destination: SSHManagerView(ssh: fridaEngine.sshManager)) {
                     ToolCard(icon: "terminal.fill", title: "SSH 管理", subtitle: "设备 SSH 服务", color: .red)
                 }
                 .buttonStyle(PlainButtonStyle())
