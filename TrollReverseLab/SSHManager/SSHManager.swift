@@ -175,8 +175,6 @@ public class SSHManager: ObservableObject {
 
     // MARK: - 状态轮询（纯事实刷新，永不误报）
 
-    private var monitorTimer: DispatchSourceTimer?
-
     private func startMonitor() {
         stopMonitor()
         let timer = DispatchSource.makeTimerSource(queue: .main)
