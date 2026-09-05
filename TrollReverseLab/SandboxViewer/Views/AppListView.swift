@@ -65,50 +65,8 @@ struct AppListView: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if scanner.isScanning {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                        Text("正在扫描 TrollStore 应用...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                } else if let permError = scanner.permissionError {
-                    // Permission error — IPA missing no-sandbox entitlement
-                    PermissionErrorView(
-                        error: permError,
-                        diagnostics: scanner.diagnostics,
-                        onRescan: { scanner.scan() },
-                        onManualPath: { showManualPath = true }
-                    )
-                } else if scanner.apps.isEmpty {
-                    EmptyStateWithDiagnosticsView(
-                        diagnostics: scanner.diagnostics,
-                        onRescan: { scanner.scan() },
-                        onManualPath: { showManualPath = true }
-                    )
-                } else {
-                    appListView
-                }
-            }
-            .navigationTitle("应用沙盒")
-            .navigationBarItems(
-                trailing: HStack {
-                    if !scanner.apps.isEmpty {
-                        Button {
-                            scanner.showDiagnostics = true
-                        } label: {
-                            Image(systemName: "info.circle")
-                        }
-                    }
-                    Button {
-                        scanner.scan()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            )
-            .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                // 扫描范围切换（iOS 14 兼容写法）
                 HStack {
                     Picker("范围", selection: Binding(
                         get: { scanner.showAllApps },
@@ -121,39 +79,87 @@ struct AppListView: View {
                         Text("仅巨魔").tag(false)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 200)
+                    .frame(width: 220)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
 
                     Spacer()
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
                 .background(Color(UIColor.systemBackground))
+
+                modeContent
             }
-            .onAppear {
-                scanner.loadCache()
-                if !scanner.isScanning {
+        }
+    }
+
+    private var modeContent: some View {
+        Group {
+            if scanner.isScanning {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("正在扫描应用...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            } else if let permError = scanner.permissionError {
+                // Permission error — IPA missing no-sandbox entitlement
+                PermissionErrorView(
+                    error: permError,
+                    diagnostics: scanner.diagnostics,
+                    onRescan: { scanner.scan() },
+                    onManualPath: { showManualPath = true }
+                )
+            } else if scanner.apps.isEmpty {
+                EmptyStateWithDiagnosticsView(
+                    diagnostics: scanner.diagnostics,
+                    onRescan: { scanner.scan() },
+                    onManualPath: { showManualPath = true }
+                )
+            } else {
+                appListView
+            }
+        }
+        .navigationTitle("应用沙盒")
+        .navigationBarItems(
+            trailing: HStack {
+                if !scanner.apps.isEmpty {
+                    Button {
+                        scanner.showDiagnostics = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                }
+                Button {
                     scanner.scan()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
             }
-            .sheet(isPresented: $scanner.showDiagnostics) {
-                DiagnosticsView(diagnostics: scanner.diagnostics)
+        )
+        .onAppear {
+            scanner.loadCache()
+            if !scanner.isScanning {
+                scanner.scan()
             }
-            .sheet(isPresented: $showManualPath) {
-                ManualPathView(path: $manualPath) { path in
-                    let manualApp = TrollStoreApp(
-                        id: "manual",
-                        bundleIdentifier: "manual",
-                        displayName: (path as NSString).lastPathComponent,
-                        version: "—",
-                        bundlePath: path,
-                        dataContainerPath: path,
-                        installDate: nil,
-                        appSize: 0,
-                        isTrollStore: true,
-                        markerType: "manual"
-                    )
-                    scanner.selectedApp = manualApp
-                }
+        }
+        .sheet(isPresented: $scanner.showDiagnostics) {
+            DiagnosticsView(diagnostics: scanner.diagnostics)
+        }
+        .sheet(isPresented: $showManualPath) {
+            ManualPathView(path: $manualPath) { path in
+                let manualApp = TrollStoreApp(
+                    id: "manual",
+                    bundleIdentifier: "manual",
+                    displayName: (path as NSString).lastPathComponent,
+                    version: "—",
+                    bundlePath: path,
+                    dataContainerPath: path,
+                    installDate: nil,
+                    appSize: 0,
+                    isTrollStore: true,
+                    markerType: "manual"
+                )
+                scanner.selectedApp = manualApp
             }
         }
     }
