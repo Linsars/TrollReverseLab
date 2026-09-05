@@ -30,15 +30,16 @@ public class SSHManager: ObservableObject {
         "/var/mobile/.ssh/authorized_keys"
     }
 
-    // MARK: - 事实查询（Filza 模式：状态 = 进程列表，不靠记忆）
+    private var serverPid: pid_t = 0
+    private var monitorTimer: DispatchSourceTimer?
 
     /// sysctl 扫进程表找 dropbear（p_comm 16 字节足够区分，设备上没有第二个 dropbear）
     public static func findDropbearPids() -> [pid_t] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
         var size = 0
-        guard sysctl(&mib, 2, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }   // mib 长度必须是 3
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-        guard sysctl(&mib, 2, &procs, &size, nil, 0) == 0 else { return [] }
+        guard sysctl(&mib, 3, &procs, &size, nil, 0) == 0 else { return [] }
         return procs.compactMap { entry -> pid_t? in
             guard entry.kp_proc.p_stat != 0 else { return nil }
             let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
@@ -61,6 +62,7 @@ public class SSHManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.isRunning = true
                     self.runningPids = existing
+                    self.binaryPath = Self.bundledSSHDir + "/dropbear"
                     self.status = "运行中（已有实例）· 端口 \(self.port) · pid \(existing.map(String.init).joined(separator: ","))"
                 }
                 self.startMonitor()
@@ -78,6 +80,7 @@ public class SSHManager: ObservableObject {
                 }
                 return
             }
+            DispatchQueue.main.async { self.binaryPath = binary }
 
             // 主机密钥（首次自动生成）
             if !FileManager.default.fileExists(atPath: self.hostKeyPath) {
@@ -105,11 +108,12 @@ public class SSHManager: ObservableObject {
             // PATH 注入捆绑目录（scp 会话用）
             let env = Self.environWithPrependedPATH(Self.bundledSSHDir)
 
-            // daemonize 模式（不带 -F）：dropbear 自行 fork 后台，父 pid 立即退出，
-            // 孤儿进程被 launchd 收养 —— app 被杀服务照跑，Filza WebDAV 同款体验
+            // daemonize 等效方案：-F 前台（实测可靠，避开 daemon() 的不确定性）
+            // + POSIX_SPAWN_SETSID 让进程自立会话 —— app 被杀后变孤儿被 launchd 收养，服务照跑
             var pid: pid_t = 0
             let argv: [UnsafeMutablePointer<CChar>?] = [
                 strdup(binary),
+                strdup("-F"),
                 strdup("-p"), strdup(String(self.port)),
                 strdup("-r"), strdup(self.hostKeyPath),
                 strdup("-B"),                                   // 允许空密码（iOS mobile 无密码时兜底）
@@ -118,7 +122,11 @@ public class SSHManager: ObservableObject {
             ]
             defer { for p in argv { free(p) } }
 
-            let rc = posix_spawn(&pid, binary, nil, nil, argv, env)
+            var attrs: posix_spawnattr_t?
+            posix_spawnattr_init(&attrs)
+            posix_spawnattr_setflags(&attrs, Int16(0x0400))     // POSIX_SPAWN_SETSID
+            let rc = posix_spawn(&pid, binary, nil, &attrs, argv, env)
+            posix_spawnattr_destroy(&attrs)
             guard rc == 0 else {
                 DispatchQueue.main.async {
                     self.isRunning = false
@@ -127,11 +135,7 @@ public class SSHManager: ObservableObject {
                 return
             }
 
-            // 收尸 daemonize 的短命父进程
-            var st: Int32 = 0
-            waitpid(pid, &st, 0)
-
-            // 0.8s 后扫进程表确认新实例真的起来了（bind 失败等会在这里现形）
+            // 短暂等待后扫进程表确认新实例真的起来了（bind 失败等会在这里现形）
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
                 let pids = Self.findDropbearPids()
                 DispatchQueue.main.async {
@@ -179,6 +183,11 @@ public class SSHManager: ObservableObject {
         timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
+            // 顺手收尸（若子进程已退出，防僵尸）
+            if self.serverPid > 0 {
+                var st: Int32 = 0
+                _ = waitpid(self.serverPid, &st, WNOHANG)
+            }
             let pids = Self.findDropbearPids()
             self.runningPids = pids
             self.isRunning = !pids.isEmpty
@@ -238,6 +247,37 @@ public class SSHManager: ObservableObject {
 
     public func readAuthorizedKeys() -> String {
         return (try? String(contentsOfFile: Self.authorizedKeysPath, encoding: .utf8)) ?? ""
+    }
+
+    /// 解析已保存的公钥（逐行，去注释空行）
+    public func savedKeys() -> [String] {
+        readAuthorizedKeys()
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    }
+
+    /// 整体覆写 authorized_keys（供删除/编辑后回写）
+    public func overwriteAuthorizedKeys(_ text: String, completion: @escaping (String) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let path = Self.authorizedKeysPath
+            var msg = ""
+            do {
+                try FileManager.default.createDirectory(atPath: "/var/mobile/.ssh", withIntermediateDirectories: true)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: "/var/mobile/.ssh")
+                let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if body.isEmpty {
+                    try "".write(toFile: path, atomically: true, encoding: .utf8)
+                } else {
+                    try (body + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+                }
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+                msg = body.isEmpty ? "公钥已清空" : "已更新 \(path)"
+            } catch {
+                msg = "写入失败: \(error.localizedDescription)"
+            }
+            DispatchQueue.main.async { completion(msg) }
+        }
     }
 
     // MARK: - 工具

@@ -7,6 +7,7 @@ struct SSHManagerView: View {
     @State private var publicKeyInput = ""
     @State private var installMessage = ""
     @State private var portText: String = ""
+    @State private var savedKeys: [String] = []
 
     var body: some View {
         Form {
@@ -76,23 +77,37 @@ struct SSHManagerView: View {
 
             // MARK: 公钥
             Section(header: Text("登录公钥（authorized_keys）"),
-                    footer: Text("粘贴你电脑上 ~/.ssh/id_ed25519.pub 或 id_rsa.pub 的内容，用对应私钥登录。密码登录在非越狱下不可用。")) {
+                    footer: Text("粘贴你电脑上 ~/.ssh/id_ed25519.pub 或 id_rsa.pub 的内容，用对应私钥登录。密码登录在非越狱下不可用。左划已保存的公钥可删除。")) {
                 TextEditor(text: $publicKeyInput)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minHeight: 80)
                 Button("写入公钥") {
                     ssh.installAuthorizedKey(publicKeyInput) { msg in
                         installMessage = msg
+                        savedKeys = ssh.savedKeys()
                     }
                 }
                 if !installMessage.isEmpty {
                     Text(installMessage).font(.caption).foregroundColor(.secondary)
                 }
-                if !ssh.readAuthorizedKeys().isEmpty {
-                    Button("清空输入查看已有公钥") {
-                        publicKeyInput = ssh.readAuthorizedKeys()
+                if !savedKeys.isEmpty {
+                    ForEach(savedKeys.indices, id: \.self) { idx in
+                        HStack {
+                            Image(systemName: "key.fill").font(.caption2).foregroundColor(.blue)
+                            Text(shortKey(savedKeys[idx]))
+                                .font(.system(.caption2, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
-                    .font(.caption)
+                    .onDelete { offsets in
+                        var remaining = savedKeys
+                        remaining.remove(atOffsets: offsets)
+                        savedKeys = remaining
+                        ssh.overwriteAuthorizedKeys(remaining.joined(separator: "\n")) { msg in
+                            installMessage = msg
+                        }
+                    }
                 }
             }
 
@@ -117,7 +132,19 @@ struct SSHManagerView: View {
         .navigationTitle("SSH 管理")
         .onAppear {
             portText = String(ssh.port)
+            savedKeys = ssh.savedKeys()
             ssh.refreshLogTail()
         }
+    }
+
+    /// 公钥缩略显示：类型 + 指纹前后段
+    private func shortKey(_ key: String) -> String {
+        let parts = key.components(separatedBy: " ")
+        guard parts.count >= 2 else { return key }
+        let type = parts.first ?? "key"
+        let data = parts.count > 1 ? parts[1] : ""
+        let head = String(data.prefix(12))
+        let tail = String(data.suffix(8))
+        return "\(type) \(head)…\(tail)"
     }
 }

@@ -202,6 +202,13 @@ struct AppRowView: View {
                             .padding(.vertical, 1)
                             .background(Color.blue.opacity(0.15))
                             .cornerRadius(4)
+                    } else {
+                        Text("App Store")
+                            .font(.system(.caption2, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
                     }
                     Text("v\(app.version)")
                         .font(.caption)
@@ -213,9 +220,15 @@ struct AppRowView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Label("TrollStore", systemImage: "checkmark.seal.fill")
-                        .font(.caption2)
-                        .foregroundColor(.orange)
+                    if app.isTrollStore {
+                        Label("TrollStore", systemImage: "checkmark.seal.fill")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    } else {
+                        Label("App Store", systemImage: "checkmark.seal.fill")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
                 }
 
                 Text(app.bundleIdentifier)
