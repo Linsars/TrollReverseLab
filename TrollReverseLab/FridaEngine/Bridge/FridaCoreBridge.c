@@ -3,8 +3,15 @@
 //  TrollReverseLab
 //
 //  Real frida-core embedding (devkit 17.17.0, ios-arm64).
-//  Dedicated GLib loop thread + device manager + local device.
-//  API flow mirrors the official frida-core-example.c.
+//
+//  线程模型（v6.4.1 修正——TRL 四连崩验尸结论）：
+//  - GLib 首次初始化（frida_init / g_main_loop_new / device manager）
+//    只允许发生在本桥的专用线程内，任何调用方线程提前触碰 GLib
+//    都会和 frida_init 撞出 thread-state 竞态（SEGV @0x8，栈：
+//    g_main_loop_new → g_once_init_enter → g_thread_state_add）。
+//  - fcb_init 只做两件事：起专用线程 + 等状态机就绪。
+//  - attach/load/unload/detach 的阻塞调用经 g_call_lock 串行化，
+//    防收件箱脚本与用户手动执行并发捅 session。
 //
 
 #include "FridaCoreBridge.h"
@@ -27,13 +34,34 @@ static void *g_state_ctx = NULL;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static char g_last_error[512] = {0};
-static volatile gboolean g_init_failed = FALSE;   // loop 线程启动失败标志（g_main_loop_is_running 在 run 前恒 FALSE，不能当存活判据）
+
+// init 状态机：fcb_init 只起线程，绝不亲手碰 GLib
+typedef enum {
+  FCB_STATE_IDLE = 0,
+  FCB_STATE_STARTING = 1,
+  FCB_STATE_READY = 2,
+  FCB_STATE_FAILED = 3
+} FcbState;
+static FcbState g_state = FCB_STATE_IDLE;
+
+// 串行化阻塞型 frida 调用（attach/load/unload/detach 全程持锁）
+static pthread_mutex_t g_call_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void set_last_error(const char *msg)
 {
   if (msg == NULL) msg = "unknown error";
   pthread_mutex_lock(&g_lock);
   snprintf(g_last_error, sizeof (g_last_error), "%s", msg);
+  pthread_mutex_unlock(&g_lock);
+}
+
+static int copy_err(char *err, int err_len, const char *msg);
+
+static void note_failed(const char *msg)
+{
+  copy_err(NULL, 0, msg);
+  pthread_mutex_lock(&g_lock);
+  g_state = FCB_STATE_FAILED;
   pthread_mutex_unlock(&g_lock);
 }
 
@@ -88,8 +116,8 @@ static gboolean deliver_detach (gpointer user_data)
 
   pthread_mutex_lock(&g_lock);
   // 目标进程死掉后 script/session 对象已惰性化——直接放引用，不做 sync 调用防自锁
-  if (g_script != NULL) { g_script = NULL; }
-  if (g_session != NULL) { g_session = NULL; }
+  g_script = NULL;
+  g_session = NULL;
   cb = g_state_cb;
   ctx = g_state_ctx;
   pthread_mutex_unlock(&g_lock);
@@ -112,7 +140,7 @@ static void on_session_detached (FridaSession * session,
   g_idle_add (deliver_detach, note);
 }
 
-// MARK: - init thread
+// MARK: - 专用 frida 线程（GLib 首次初始化的唯一现场）
 
 static gpointer loop_thread_func (gpointer user_data)
 {
@@ -121,16 +149,19 @@ static gpointer loop_thread_func (gpointer user_data)
   gint num_devices, i;
   (void) user_data;
 
+  // 顺序铁律：frida_init 必须先于一切 GLib 对象创建，且全部在本线程
   frida_init ();
+
+  g_loop = g_main_loop_new (NULL, TRUE);
 
   g_manager = frida_device_manager_new ();
 
   devices = frida_device_manager_enumerate_devices_sync (g_manager, NULL, &error);
   if (error != NULL)
   {
-    g_init_failed = TRUE;
     copy_gerror (NULL, 0, &error);
     g_printerr ("[fcb] device enumeration failed, loop thread exiting\n");
+    note_failed (fcb_last_error ());
     return NULL;
   }
 
@@ -150,13 +181,17 @@ static gpointer loop_thread_func (gpointer user_data)
 
   if (g_local_device == NULL)
   {
-    g_init_failed = TRUE;
     copy_err (NULL, 0, "local device not found");
     g_printerr ("[fcb] no local device, loop thread exiting\n");
+    note_failed ("local device not found");
     return NULL;
   }
 
   g_printerr ("[fcb] frida-core %s ready, local device acquired\n", frida_version_string ());
+
+  pthread_mutex_lock(&g_lock);
+  g_state = FCB_STATE_READY;
+  pthread_mutex_unlock(&g_lock);
 
   g_main_loop_run (g_loop);   // runs forever
   return NULL;
@@ -169,41 +204,59 @@ int fcb_init (char * err, int err_len)
   pthread_t tid;
 
   pthread_mutex_lock(&g_lock);
-  gboolean already = (g_loop != NULL);
+  FcbState st = g_state;
   pthread_mutex_unlock(&g_lock);
-  if (already)
+
+  if (st == FCB_STATE_READY)
     return 0;
+  if (st == FCB_STATE_FAILED)
+    return copy_err (err, err_len, fcb_last_error ());
 
-  g_loop = g_main_loop_new (NULL, TRUE);
-  if (pthread_create (&tid, NULL, loop_thread_func, NULL) != 0)
-    return copy_err (err, err_len, "failed to spawn frida loop thread");
-  pthread_detach (tid);
+  if (st == FCB_STATE_IDLE)
+  {
+    // 并发调用者只有一个能把 IDLE 推进到 STARTING 并起线程
+    pthread_mutex_lock(&g_lock);
+    if (g_state == FCB_STATE_IDLE)
+    {
+      g_state = FCB_STATE_STARTING;
+      pthread_mutex_unlock(&g_lock);
+      if (pthread_create (&tid, NULL, loop_thread_func, NULL) != 0)
+      {
+        pthread_mutex_lock(&g_lock);
+        g_state = FCB_STATE_FAILED;
+        pthread_mutex_unlock(&g_lock);
+        return copy_err (err, err_len, "failed to spawn frida loop thread");
+      }
+      pthread_detach (tid);
+    }
+    else
+    {
+      pthread_mutex_unlock(&g_lock);
+    }
+  }
 
-  // 设备枚举在子线程异步完成——最多等 5 秒确认就绪
-  for (int i = 0; i < 50; i++)
+  // STARTING（含并发到达者）：等就绪/失败，frida_init 首次初始化偏重给足 10s
+  for (int i = 0; i < 100; i++)
   {
     usleep (100 * 1000);
-    if (g_init_failed)
-      return copy_err (err, err_len, fcb_last_error ());
     pthread_mutex_lock(&g_lock);
-    gboolean ready = (g_local_device != NULL);
+    FcbState now = g_state;
     pthread_mutex_unlock(&g_lock);
-    if (ready)
+    if (now == FCB_STATE_READY)
       return 0;
+    if (now == FCB_STATE_FAILED)
+      return copy_err (err, err_len, fcb_last_error ());
   }
-  return copy_err (err, err_len, "frida-core init timeout (no local device in 5s)");
+  return copy_err (err, err_len, "frida-core init timeout (10s)");
 }
 
-int fcb_attach (uint32_t pid, char * err, int err_len)
+static int fcb_attach_locked (uint32_t pid, char * err, int err_len)
 {
   GError * error = NULL;
   FridaSession * session;
   FridaDevice * device;
 
-  if (fcb_init (err, err_len) != 0)
-    return -1;
-
-  // 引擎层可能重复 attach（新 bridge 实例）——C 层全局状态，先清干净旧会话
+  // 引擎层可能重复 attach（新 bridge 实例）——先清干净旧会话
   GError * stale_error = NULL;
   pthread_mutex_lock(&g_lock);
   FridaScript * stale_script = g_script;
@@ -243,7 +296,17 @@ int fcb_attach (uint32_t pid, char * err, int err_len)
   return 0;
 }
 
-int fcb_load_script (const char * source, char * err, int err_len)
+int fcb_attach (uint32_t pid, char * err, int err_len)
+{
+  if (fcb_init (err, err_len) != 0)
+    return -1;
+  pthread_mutex_lock (&g_call_lock);
+  int rc = fcb_attach_locked (pid, err, err_len);
+  pthread_mutex_unlock (&g_call_lock);
+  return rc;
+}
+
+static int fcb_load_script_locked (const char * source, char * err, int err_len)
 {
   GError * error = NULL;
   FridaSession * session;
@@ -296,7 +359,15 @@ int fcb_load_script (const char * source, char * err, int err_len)
   return 0;
 }
 
-int fcb_unload_script (char * err, int err_len)
+int fcb_load_script (const char * source, char * err, int err_len)
+{
+  pthread_mutex_lock (&g_call_lock);
+  int rc = fcb_load_script_locked (source, err, err_len);
+  pthread_mutex_unlock (&g_call_lock);
+  return rc;
+}
+
+static int fcb_unload_script_locked (char * err, int err_len)
 {
   pthread_mutex_lock(&g_lock);
   FridaScript * script = g_script;
@@ -317,7 +388,15 @@ int fcb_unload_script (char * err, int err_len)
   return 0;
 }
 
-int fcb_detach (char * err, int err_len)
+int fcb_unload_script (char * err, int err_len)
+{
+  pthread_mutex_lock (&g_call_lock);
+  int rc = fcb_unload_script_locked (err, err_len);
+  pthread_mutex_unlock (&g_call_lock);
+  return rc;
+}
+
+static int fcb_detach_locked (char * err, int err_len)
 {
   GError * error = NULL;
   FridaScript * script;
@@ -347,6 +426,14 @@ int fcb_detach (char * err, int err_len)
   }
   frida_unref (session);
   return 0;
+}
+
+int fcb_detach (char * err, int err_len)
+{
+  pthread_mutex_lock (&g_call_lock);
+  int rc = fcb_detach_locked (err, err_len);
+  pthread_mutex_unlock (&g_call_lock);
+  return rc;
 }
 
 int fcb_is_connected (void)
