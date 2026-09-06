@@ -34,16 +34,22 @@ jobs:
         run: |
           cd /tmp/frida
           # compiler_backend=disabled: 官方 arm64e 同款配置——免 Go>=1.24 依赖
-          # （新 TS 编译器后端要 typescript-go；脚本执行用 QJS 不需要它）
+          # compat=disabled: 不做 arm64e universal 变体（单架构构建必挂点，
+          #   compat 层会要求 frida-helper-arm64e 等第二架构产物）
           ./configure \
             --prefix=/usr \
             --host=ios-arm64 \
             -- \
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
+            -Dfrida-core:compat=disabled \
             -Dfrida-core:devkits=core
 
       - name: Compile
+        env:
+          # post-process.py 要 codesign agent/gadget；TrollStore 链路最后由 ldid
+          # 重签，这里 ad-hoc 即可
+          IOS_CERTID: "-"
         run: |
           cd /tmp/frida
           make -j3
