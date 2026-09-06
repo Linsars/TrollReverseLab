@@ -33,12 +33,14 @@ jobs:
       - name: Configure
         run: |
           cd /tmp/frida
+          # compiler_backend=disabled: 官方 arm64e 同款配置——免 Go>=1.24 依赖
+          # （新 TS 编译器后端要 typescript-go；脚本执行用 QJS 不需要它）
           ./configure \
             --prefix=/usr \
             --host=ios-arm64 \
             -- \
             -Dfrida-core:assets=installed \
-            -Dfrida-core:compiler_backend=enabled \
+            -Dfrida-core:compiler_backend=disabled \
             -Dfrida-core:devkits=core
 
       - name: Compile
