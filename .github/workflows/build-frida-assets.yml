@@ -1,0 +1,90 @@
+name: Build Frida iOS assets (helper/agent/server from source)
+
+# frida 官方 release 不发独立 frida-helper——local 后端要求它躺在 .app 目录。
+# 本 workflow 从 frida 17.17.0 源码完整构建并产出全套 iOS 资产，
+# 发布到 tag frida-assets-17.17.0 供主构建 workflow 下载捆绑。
+# 独立于主构建：本 job 失败不影响 TRL 出包（local 后端退回 frida-server 路线）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  frida-ios-assets:
+    name: Build frida-core ios-arm64
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - name: Checkout frida 17.17.0 (recursive)
+        run: |
+          git config --global --add safe.directory '*'
+          git clone --depth 1 --branch 17.17.0 --recursive \
+            https://github.com/frida/frida.git /tmp/frida
+
+      - name: Install meson toolchain deps
+        run: |
+          brew install ninja pkg-config
+          pip3 install --break-system-packages meson || pip3 install meson
+          python3 -m pip install --break-system-packages meson || true
+          which meson ninja valac || true
+
+      - name: Configure
+        run: |
+          cd /tmp/frida
+          ./configure \
+            --prefix=/usr \
+            --host=ios-arm64 \
+            -- \
+            -Dfrida-core:assets=installed \
+            -Dfrida-core:compiler_backend=enabled \
+            -Dfrida-core:devkits=core
+
+      - name: Compile
+        run: |
+          cd /tmp/frida
+          make -j3
+
+      - name: Install to DESTDIR
+        run: |
+          cd /tmp/frida
+          DESTDIR=/tmp/frida-prefix make install
+
+      - name: Collect assets
+        run: |
+          P=/tmp/frida-prefix/usr/lib/frida-1.0
+          B=/tmp/frida-prefix/usr/bin
+          echo "== prefix layout =="
+          ls -la "$P" || true
+          ls -la "$B" || true
+          mkdir -p /tmp/assets
+          for f in "$P/frida-helper" "$P/frida-agent.dylib" "$P/frida-gadget.dylib" \
+                   "$B/frida-server" "$B/frida-inject"; do
+            if [ -f "$f" ]; then cp "$f" /tmp/assets/; fi
+          done
+          file /tmp/assets/* || true
+          # 主构建预期符号核查：helper 必须是 ios arm64
+          file /tmp/assets/frida-helper
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frida-ios-arm64-assets
+          path: /tmp/assets/
+          retention-days: 90
+
+      - name: Publish to release tag frida-assets-17.17.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="frida-assets-17.17.0"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --title "Frida iOS arm64 assets (built from frida 17.17.0)" \
+            --notes "frida-helper / frida-agent / frida-server / frida-inject for ios-arm64, built from source. Consumed by build-ipa.yml to enable the frida-core local backend without a jailbreak frida-server." \
+            || true
+          for f in /tmp/assets/*; do
+            gh release upload "$TAG" "$f" --clobber
+          done
+          gh release view "$TAG" --json assets --jq '.assets[].name'

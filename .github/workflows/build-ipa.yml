@@ -202,6 +202,35 @@ jobs:
           ls -la "$APP_PATH/ssh"
           echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
 
+      - name: Bundle frida local-backend assets (best effort)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ENT="$GITHUB_WORKSPACE/TrollReverseLab/TrollReverseLab.entitlements"
+          TAG="frida-assets-17.17.0"
+          mkdir -p /tmp/frida-assets
+          DL=0
+          if gh release download "$TAG" -D /tmp/frida-assets --clobber 2>/dev/null; then
+            DL=1
+          else
+            echo "frida assets release $TAG not available — skipping local backend bundle (frida-server backend still works)"
+          fi
+          if [ "$DL" = "1" ] && [ -f /tmp/frida-assets/frida-helper ]; then
+            # frida-core local 后端按 .app 根目录找 frida-helper / frida-agent.dylib
+            cp /tmp/frida-assets/frida-helper "$APP_PATH/frida-helper"
+            cp /tmp/frida-assets/frida-agent.dylib "$APP_PATH/frida-agent.dylib" 2>/dev/null || true
+            [ -f /tmp/frida-assets/frida-server ] && cp /tmp/frida-assets/frida-server "$APP_PATH/frida-server"
+            chmod +x "$APP_PATH"/frida-* 2>/dev/null || true
+            for b in "$APP_PATH"/frida-helper "$APP_PATH"/frida-agent.dylib "$APP_PATH"/frida-server; do
+              [ -f "$b" ] && ldid -S"$ENT" "$b"
+            done
+            echo "Frida local-backend assets bundled:"
+            ls -la "$APP_PATH" | grep frida
+          else
+            echo "No frida-helper available — app will rely on device frida-server (127.0.0.1:27042)"
+          fi
+
       - name: Package IPA
         run: |
           mkdir -p build/Payload

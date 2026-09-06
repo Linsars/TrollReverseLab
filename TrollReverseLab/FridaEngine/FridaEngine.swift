@@ -189,7 +189,11 @@ public final class FridaEngine: ObservableObject {
 
     /// Loads and executes a Frida JS script in the attached process.
     public func executeScript(_ script: String, name: String) {
-        guard case .attached = state else {
+        // .attached 与 .scriptLoaded 都算"会话活着"——否则第二个脚本永远被拒
+        var sessionAlive = false
+        if case .attached = state { sessionAlive = true }
+        if case .scriptLoaded = state { sessionAlive = true }
+        guard sessionAlive else {
             logError("No process attached. Attach to a process first.")
             return
         }
