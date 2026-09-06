@@ -35,14 +35,17 @@ targets:
         INFOPLIST_FILE: TrollReverseLab/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: TrollReverseLab/TrollReverseLab.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.trollreverse.reverselab
-        MARKETING_VERSION: "6.3.16"
+        MARKETING_VERSION: "6.4.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_EMIT_LOC_STRINGS: YES
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
         FRAMEWORK_SEARCH_PATHS: "$(PROJECT_DIR)/TrollReverseLab/Frameworks"
-        OTHER_LDFLAGS: "-ObjC -lsqlite3"
+        SWIFT_OBJC_BRIDGING_HEADER: TrollReverseLab/TrollReverseLab-Bridging-Header.h
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/Vendor/FridaCore $(PROJECT_DIR)/TrollReverseLab/FridaEngine/Bridge"
+        LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/Vendor/FridaCore"
+        OTHER_LDFLAGS: "-ObjC -lsqlite3 -lfrida-core -lbsm -lresolv -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework UIKit"
     entitlements:
       path: TrollReverseLab/TrollReverseLab.entitlements
     info:

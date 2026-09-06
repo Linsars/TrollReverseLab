@@ -24,6 +24,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Fetch frida-core devkit (17.17.0)
+        run: |
+          set -e
+          FC_VER="17.17.0"
+          test -f Vendor/FridaCore/frida-core.h || { echo "::error::Vendor/FridaCore/frida-core.h missing from repo"; exit 1; }
+          if [ ! -f Vendor/FridaCore/libfrida-core.a ]; then
+            URLS=(
+              "https://ghfast.top/https://github.com/frida/frida/releases/download/${FC_VER}/frida-core-devkit-${FC_VER}-ios-arm64.tar.xz"
+              "https://github.com/frida/frida/releases/download/${FC_VER}/frida-core-devkit-${FC_VER}-ios-arm64.tar.xz"
+            )
+            ok=0
+            for u in "${URLS[@]}"; do
+              echo "Trying $u"
+              curl -fL --retry 2 --max-time 300 "$u" -o /tmp/fc.tar.xz && ok=1 && break
+            done
+            [ "$ok" = "1" ] || { echo "::error::frida-core devkit download failed"; exit 1; }
+            mkdir -p /tmp/fcx && tar xJf /tmp/fc.tar.xz -C /tmp/fcx
+            cp /tmp/fcx/libfrida-core.a Vendor/FridaCore/libfrida-core.a
+          fi
+          file Vendor/FridaCore/libfrida-core.a
+          ls -la Vendor/FridaCore/
+
       - name: Install xcodegen
         run: |
           brew install xcodegen

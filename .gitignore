@@ -13,6 +13,9 @@ build/
 *.ipa
 *.app
 
+# frida-core devkit binary (downloaded in CI; header is committed)
+Vendor/FridaCore/libfrida-core.a
+
 # IDE
 .vscode/
 .idea/

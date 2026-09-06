@@ -2,8 +2,11 @@
 //  FridaBridge.swift
 //  TrollReverseLab
 //
-//  Module 2: Bridge layer for communication with frida-gadget.
-//  Provides the interface between Swift and the Frida JavaScript runtime.
+//  Module 2: Swift bridge to the embedded frida-core engine.
+//  The C layer (FridaCoreBridge.c) owns GLib/frida types; this file maps
+//  them to Swift with explicit error handling. C-level state is global —
+//  instances are thin handles and delegate routing goes through the
+//  static activeDelegate so re-created bridge instances keep working.
 //
 
 import Foundation
@@ -11,6 +14,13 @@ import Foundation
 /// Protocol for receiving messages from the Frida bridge.
 public protocol FridaBridgeDelegate: AnyObject {
     func bridge(_ bridge: FridaBridge, didReceiveMessage message: BridgeMessage)
+    /// Session detached from the target (target died / frida dropped it).
+    func bridgeDidDetach(_ bridge: FridaBridge, reason: Int32)
+}
+
+extension FridaBridgeDelegate {
+    /// Optional: engines that don't care can skip it.
+    public func bridgeDidDetach(_ bridge: FridaBridge, reason: Int32) {}
 }
 
 /// Types of messages received from the Frida runtime.
@@ -25,123 +35,200 @@ public struct BridgeMessage {
     public let data: [String: Any]
 }
 
-/// Bridge to frida-gadget runtime for local process debugging.
-/// Communicates via a local RPC channel (Unix domain socket or named pipe).
+/// Bridge to the embedded frida-core runtime for local process debugging.
 public final class FridaBridge {
 
-    public weak var delegate: FridaBridgeDelegate?
+    public weak var delegate: FridaBridgeDelegate? {
+        didSet {
+            // C 回调只认识全局单例；新引擎实例设置 delegate 时提升为活跃路由
+            if let d = delegate { FridaBridge.activeDelegate = d }
+        }
+    }
 
-    /// Connection state
+    /// Connection state (mirrors fcb_is_connected, cached for sync access)
     private(set) var isConnected = false
 
-    /// The Frida gadget configuration for local-only operation.
-    /// Restricts to interactive mode with no network listener exposure.
-    public static let gadgetConfig: [String: Any] = [
-        "interaction": [
-            "type": "script",
-            "path": "/data/local/tmp/frida-script.js",
-            "on_change": "reload"
-        ],
-        "teardown": "full"
-    ]
+    /// Active delegate — C callbacks dispatch here. Weak: engine lifetime rules.
+    private static weak var activeDelegate: FridaBridgeDelegate?
 
-    public init() {}
+    /// Global singleton: registers the C callbacks exactly once.
+    private static let shared: FridaBridge = {
+        let b = FridaBridge(registering: false)
+        let ctx = Unmanaged.passUnretained(b).toOpaque()
+        fcb_set_message_callback({ json, cctx in
+            guard let cctx = cctx else { return }
+            let target = Unmanaged<FridaBridge>.fromOpaque(cctx).takeUnretainedValue()
+            target.dispatchCMessage(json)
+        }, ctx)
+        fcb_set_state_callback({ reason, cctx in
+            guard let cctx = cctx else { return }
+            let target = Unmanaged<FridaBridge>.fromOpaque(cctx).takeUnretainedValue()
+            target.dispatchCDetach(reason)
+        }, ctx)
+        return b
+    }()
+
+    public init() {
+        _ = FridaBridge.shared   // 首次 init 触发回调注册
+    }
+
+    private init(registering: Bool) {}
 
     // MARK: - Process Enumeration
 
-    /// Enumerates local processes visible to the Frida runtime.
-    /// Filters to only return user-installed applications.
+    /// Enumerates local processes via sysctl (same proven pattern as
+    /// SSHManager.findDropbearPids). Zombies and kernel threads excluded.
     public func enumerateProcesses() -> [LocalProcess] {
-        // In production, this calls frida-core's device.enumerateProcesses()
-        // via the C bridge. For the scaffold, we return an empty list.
-        //
-        // The actual implementation links against FridaCore.framework and calls:
-        //   let device = Device.local()
-        //   let processes = try device.enumerateProcesses()
-        //   return processes.filter { isUserApp($0) }
-        return []
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, 3, &procs, &size, nil, 0) == 0 else { return [] }
+
+        var result: [LocalProcess] = []
+        for entry in procs {
+            let pid = entry.kp_proc.p_pid
+            guard pid > 1, entry.kp_proc.p_stat != 0, entry.kp_proc.p_stat != 6 else { continue }  // SZOMB=6
+            let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
+                String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
+            guard !comm.isEmpty else { continue }
+            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid))
+        }
+        return result.sorted { $0.pid < $1.pid }
     }
 
     // MARK: - Process Attachment
 
-    /// Attaches to a local process by PID.
-    /// - Parameter pid: Process ID of the user-selected app
-    /// - Parameter completion: Called with success/failure on the main thread
+    /// Attaches to a local process by PID via frida-core local device.
     public func attach(to pid: Int32, completion: @escaping (Bool, String?) -> Void) {
-        // In production:
-        //   let session = try device.attach(pid)
-        //   self.session = session
-        //   self.isConnected = true
-
-        // Security: Verify PID corresponds to a user-selected TrollStore app
-        // before allowing attachment.
-        guard validateProcessForAttachment(pid) else {
-            completion(false, "Process validation failed: only user-selected TrollStore apps can be attached.")
-            return
+        DispatchQueue.global(qos: .userInitiated).async {
+            var err = [CChar](repeating: 0, count: 512)
+            if fcb_init(&err, 512) != 0 {
+                let msg = String(cString: err)
+                DispatchQueue.main.async {
+                    self.isConnected = false
+                    completion(false, "frida-core 初始化失败: \(msg)")
+                }
+                return
+            }
+            var err2 = [CChar](repeating: 0, count: 512)
+            if fcb_attach(UInt32(bitPattern: pid), &err2, 512) != 0 {
+                let msg = String(cString: err2)
+                DispatchQueue.main.async {
+                    self.isConnected = false
+                    completion(false, "attach 失败: \(msg)")
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                self.isConnected = true
+                completion(true, nil)
+            }
         }
-
-        isConnected = true
-        completion(true, nil)
     }
 
     /// Detaches from the current process session.
     public func detach() {
-        // In production: session?.detach()
-        isConnected = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            var err = [CChar](repeating: 0, count: 512)
+            _ = fcb_detach(&err, 512)
+            DispatchQueue.main.async { self.isConnected = false }
+        }
     }
 
     // MARK: - Script Execution
 
-    /// Executes a JavaScript script in the attached process.
-    /// - Parameter script: Frida JS script source code
-    /// - Parameter completion: Result with output string or error
+    /// Loads a Frida JS script into the attached process (QJS runtime).
+    /// send()/console.log() output arrives via the delegate message channel.
     public func executeScript(_ script: String, completion: @escaping (Result<String, Error>) -> Void) {
         guard isConnected else {
             completion(.failure(FridaBridgeError.notConnected))
             return
         }
-
-        // In production:
-        //   let script = try session.createScript(script)
-        //   script.setMessageHandler { message, data in ... }
-        //   try script.load()
-        //   The script's send() calls are routed to the message handler.
-
-        // For the scaffold, we simulate script execution feedback
         DispatchQueue.global(qos: .userInitiated).async {
-            // Parse send() calls from the script to simulate output
-            let outputs = self.extractSendCalls(from: script)
-            DispatchQueue.main.async {
-                completion(.success(outputs))
-            }
-        }
-    }
-
-    // MARK: - Security Validation
-
-    /// Validates that a PID corresponds to an allowed process for attachment.
-    private func validateProcessForAttachment(_ pid: Int32) -> Bool {
-        // In production, this checks:
-        // 1. The process is a user-installed app (not a system daemon)
-        // 2. The app was installed via TrollStore (has .appInfo.plist)
-        // 3. The user explicitly selected this app in the UI
-        // 4. The app is not an App Store application
-        return true // Placeholder — actual validation in production
-    }
-
-    /// Extracts send() call arguments from a Frida script for simulation.
-    private func extractSendCalls(from script: String) -> String {
-        var outputs: [String] = []
-        let pattern = #"send\(\s*['"]?(.+?)['"]?\s*\)"#
-        if let regex = try? NSRegularExpression(pattern: pattern) {
-            let range = NSRange(script.startIndex..., in: script)
-            regex.enumerateMatches(in: script, range: range) { match, _, _ in
-                if let match = match, let r = Range(match.range(at: 1), in: script) {
-                    outputs.append(String(script[r]))
+            var err = [CChar](repeating: 0, count: 512)
+            if fcb_load_script(script, &err, 512) != 0 {
+                let msg = String(cString: err)
+                DispatchQueue.main.async {
+                    completion(.failure(FridaBridgeError.scriptLoadFailed(msg)))
                 }
+                return
+            }
+            DispatchQueue.main.async {
+                let ver = String(cString: fcb_version_string())
+                completion(.success("script loaded (frida-core \(ver))"))
             }
         }
-        return outputs.isEmpty ? "[Script loaded — no output]" : outputs.joined(separator: "\n")
+    }
+
+    // MARK: - C Callback Routing
+
+    /// Entry point for script messages from the GLib loop thread.
+    func dispatchCMessage(_ json: UnsafePointer<CChar>?) {
+        guard let json = json else { return }
+        let raw = String(cString: json)
+        guard let data = raw.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            Self.deliver(BridgeMessage(type: .output, data: ["text": raw]))
+            return
+        }
+        switch obj["type"] as? String ?? "" {
+        case "log":
+            // console.log / console.warn / console.error from the script
+            let payload = obj["payload"] as? String ?? raw
+            Self.deliver(BridgeMessage(type: .output, data: ["text": payload]))
+        case "send":
+            // script send() calls
+            if let payload = obj["payload"] {
+                var text: String
+                if let s = payload as? String {
+                    text = s
+                } else if let jd = try? JSONSerialization.data(withJSONObject: payload),
+                          let s = String(data: jd, encoding: .utf8) {
+                    text = s
+                } else {
+                    text = String(describing: payload)
+                }
+                Self.deliver(BridgeMessage(type: .output, data: ["text": text]))
+            } else {
+                Self.deliver(BridgeMessage(type: .output, data: ["text": raw]))
+            }
+        case "error":
+            var d: [String: Any] = ["message": obj["description"] as? String ?? raw]
+            if let stack = obj["stack"] as? String { d["stack"] = stack }
+            Self.deliver(BridgeMessage(type: .error, data: d))
+        default:
+            Self.deliver(BridgeMessage(type: .output, data: ["text": raw]))
+        }
+    }
+
+    /// Entry point for session-detach events from the GLib loop thread.
+    func dispatchCDetach(_ reason: Int32) {
+        DispatchQueue.main.async {
+            self.isConnected = false
+            FridaBridge.activeDelegate?.bridgeDidDetach(self, reason: reason)
+        }
+    }
+
+    /// Fan a message out to the active delegate (main thread).
+    private static func deliver(_ message: BridgeMessage) {
+        guard let delegate = activeDelegate else { return }
+        DispatchQueue.main.async {
+            delegate.bridge(FridaBridge.shared, didReceiveMessage: message)
+        }
+    }
+
+    /// Human-readable detach reason (logging helper).
+    public static func detachReasonName(_ reason: Int32) -> String {
+        switch reason {
+        case 1: return "application_requested"
+        case 2: return "process_replaced"
+        case 3: return "process_terminated"
+        case 4: return "connection_terminated"
+        case 5: return "device_lost"
+        default: return "reason_\(reason)"
+        }
     }
 }
 

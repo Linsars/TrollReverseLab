@@ -79,31 +79,32 @@ public final class FridaEngine: ObservableObject {
     // MARK: - Process Management (from Material 3)
 
     /// Lists local processes that can be attached.
-    /// Only returns TrollStore-installed application processes.
-    /// Frida-gadget attach constraint: only mounts isTrollStoreApp==true app processes.
+    /// Returns the full live process list via sysctl (kernel threads and
+    /// zombies excluded). Works without any Frida connection.
     public func listAttachableProcesses() -> [LocalProcess] {
-        // Enumerate TrollStore app processes via Frida bridge
-        guard let bridge = bridge, bridge.isConnected else {
-            return listTrollProcesses()
-        }
-        return bridge.enumerateProcesses()
+        return listTrollProcesses()
     }
 
-    /// Enumerates system processes and filters to only TrollStore apps.
-    /// Based on Material 3's listTrollProcesses() logic.
+    /// Real process enumeration via sysctl KERN_PROC_ALL.
+    /// Same proven pattern as SSHManager.findDropbearPids (mib len 3, SZOMB=6 filter).
     public func listTrollProcesses() -> [LocalProcess] {
-        let targetPids: [LocalProcess] = []
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }   // mib 长度必须是 3
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, 3, &procs, &size, nil, 0) == 0 else { return [] }
 
-        // In production: use sysctl/proc_listallpids to enumerate processes
-        // then filter by checking if the process bundle has .appInfo.plist marker
-        // For the scaffold, we return an empty list until frida-gadget is connected
-        //
-        // Production implementation:
-        //   let pids = proc_listallpids(nil, 0)
-        //   for each pid: get process path, check .appInfo.plist exists
-        //   if TrollStoreAppScanner.isTrollStoreApp(appContainerURL: url): include
-
-        return targetPids
+        var result: [LocalProcess] = []
+        for entry in procs {
+            let pid = entry.kp_proc.p_pid
+            guard pid > 1, entry.kp_proc.p_stat != 0, entry.kp_proc.p_stat != 6 else { continue }  // 僵尸不上报
+            let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
+                String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
+            guard !comm.isEmpty else { continue }
+            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid))
+        }
+        return result.sorted { $0.pid < $1.pid }
     }
 
     /// Attaches to a user-selected local app process for debugging.
@@ -112,18 +113,20 @@ public final class FridaEngine: ObservableObject {
         currentProcess = process
         diskLog("[ATTACH] request: \(process.name) pid=\(process.pid)")
 
-        // Initialize bridge connection to frida-gadget
+        // Initialize bridge connection to frida-core (local device)
         bridge = FridaBridge()
         bridge?.delegate = self
         bridge?.attach(to: process.pid) { [weak self] success, error in
             DispatchQueue.main.async {
+                guard let self = self else { return }
                 if success {
-                    self?.state = .attached(processName: process.name)
-                    self?.logInfo("Attached to \(process.name) (PID: \(process.pid))")
-                    self?.sshManager.start()
+                    self.state = .attached(processName: process.name)
+                    self.logInfo("Attached to \(process.name) (PID: \(process.pid))")
+                    self.sshManager.start()
+                    self.startInboxWatcher()
                 } else {
-                    self?.state = .error(message: error ?? "Unknown error")
-                    self?.logError(error ?? "Attachment failed")
+                    self.state = .error(message: error ?? "Unknown error")
+                    self.logError(error ?? "Attachment failed")
                 }
             }
         }
@@ -135,6 +138,51 @@ public final class FridaEngine: ObservableObject {
         currentProcess = nil
         state = .disconnected
         logInfo("Detached from process")
+    }
+
+    // MARK: - Script Inbox（SSH 自动驾驶总线）
+
+    /// 收件箱：Documents/frida_inbox/ 下出现 .js 即执行到已 attach 目标，执行后改名 .done
+    /// SSH 写脚本 = 驾驶，trl_frida.log = 观察，全程用户不碰屏幕
+    private var inboxTimer: DispatchSourceTimer?
+
+    private var inboxDirectory: String {
+        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+        return (docs as NSString).appendingPathComponent("frida_inbox")
+    }
+
+    /// attach 成功后启动轮询；目录常驻创建，SSH 端可提前投递
+    private func startInboxWatcher() {
+        try? FileManager.default.createDirectory(atPath: inboxDirectory, withIntermediateDirectories: true)
+        diskLog("[INBOX] ready: \(inboxDirectory)")
+
+        guard inboxTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 2, repeating: 2.0)
+        timer.setEventHandler { [weak self] in
+            self?.drainInbox()
+        }
+        timer.resume()
+        inboxTimer = timer
+    }
+
+    private func drainInbox() {
+        guard case .attached = state else { return }   // 未 attach 不消费，脚本留在箱里
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: inboxDirectory) else { return }
+        for file in files.sorted() where file.hasSuffix(".js") {
+            let path = (inboxDirectory as NSString).appendingPathComponent(file)
+            guard let data = FileManager.default.contents(atPath: path),
+                  let script = String(data: data, encoding: .utf8), !script.isEmpty else { continue }
+
+            let donePath = path + ".done"
+            try? FileManager.default.removeItem(atPath: donePath)
+            try? FileManager.default.moveItem(atPath: path, toPath: donePath)   // 先消费防重放
+            let name = (file as NSString).deletingPathExtension
+            diskLog("[INBOX] executing \(file)")
+            DispatchQueue.main.async {
+                self.executeScript(script, name: "inbox:\(name)")
+            }
+        }
     }
 
     // MARK: - Script Execution
@@ -302,6 +350,14 @@ extension FridaEngine: FridaBridgeDelegate {
             case .error:
                 self.logError(message.data["message"] as? String ?? "Unknown error")
             }
+        }
+    }
+
+    public func bridgeDidDetach(_ bridge: FridaBridge, reason: Int32) {
+        DispatchQueue.main.async {
+            self.diskLog("[DETACH] session detached: \(FridaBridge.detachReasonName(reason))")
+            self.state = .disconnected
+            self.logInfo("Session detached: \(FridaBridge.detachReasonName(reason))")
         }
     }
 }
