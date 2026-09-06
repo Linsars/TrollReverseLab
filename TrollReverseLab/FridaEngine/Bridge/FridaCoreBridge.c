@@ -75,14 +75,19 @@ static int copy_err(char *err, int err_len, const char *msg)
 
 static int copy_gerror(char *err, int err_len, GError **errorp)
 {
-  const char *msg = (errorp != NULL && *errorp != NULL) ? (*errorp)->message : "unknown frida error";
   if (errorp != NULL && *errorp != NULL)
   {
-    g_printerr ("[fcb] frida error: %s\n", (*errorp)->message);
+    // strdup BEFORE free —— 直接引用 (*errorp)->message 拷贝是 use-after-free
+    // （v6.4.1 实锤：attach 失败信息变乱码 `@˖B{` 就是读的已释放内存）
+    gchar *dup = g_strdup ((*errorp)->message);
+    g_printerr ("[fcb] frida error: %s\n", dup != NULL ? dup : "unknown");
     g_error_free (*errorp);
     *errorp = NULL;
+    int rc = copy_err (err, err_len, dup != NULL ? dup : "unknown frida error");
+    g_free (dup);
+    return rc;
   }
-  return copy_err(err, err_len, msg);
+  return copy_err(err, err_len, "unknown frida error");
 }
 
 // MARK: - callbacks (GLib threads)
@@ -148,6 +153,17 @@ static gpointer loop_thread_func (gpointer user_data)
   FridaDeviceList * devices;
   gint num_devices, i;
   (void) user_data;
+
+  // stderr → 落盘：frida-core 内部诊断（g_printerr）+ [fcb] 行全部可 SSH 旁观
+  //TRL 有 no-sandbox + 绝对路径读写 entitlement，直接写全局 Documents
+  {
+    const char *logpath = getenv ("TRL_FRIDA_STDERR_LOG");
+    if (logpath == NULL || logpath[0] == '\0')
+      logpath = "/var/mobile/Documents/trl_stderr.log";
+    if (freopen (logpath, "a", stderr) != NULL)
+      setvbuf (stderr, NULL, _IOLBF, 0);
+    g_printerr ("[fcb] === stderr capture started (frida-core %s) ===\n", frida_version_string ());
+  }
 
   // 顺序铁律：frida_init 必须先于一切 GLib 对象创建，且全部在本线程
   frida_init ();
