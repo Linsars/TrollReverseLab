@@ -30,7 +30,7 @@ public class SSHManager: ObservableObject {
         "/var/mobile/.ssh/authorized_keys"
     }
 
-    private var serverPid: pid_t = 0
+    private var startEpoch = 0    // 启停代际计数：防 stop 的 1.5s 杀尾扫误杀新一轮实例 / 防 start 的 0.8s 确认覆盖 stop
     private var monitorTimer: DispatchSourceTimer?
 
     /// sysctl 扫进程表找 dropbear（p_comm 16 字节足够区分，设备上没有第二个 dropbear）
@@ -41,7 +41,8 @@ public class SSHManager: ObservableObject {
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
         guard sysctl(&mib, 3, &procs, &size, nil, 0) == 0 else { return [] }
         return procs.compactMap { entry -> pid_t? in
-            guard entry.kp_proc.p_stat != 0 else { return nil }
+            // SZOMB=6（XNU）：僵尸不是运行中的服务——不杀僵尸（信号无效）也不上报，交给 reapAll
+            guard entry.kp_proc.p_stat != 0, entry.kp_proc.p_stat != 6 else { return nil }
             let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
                 String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
             }
@@ -68,6 +69,9 @@ public class SSHManager: ObservableObject {
                 self.startMonitor()
                 return
             }
+
+            self.startEpoch += 1
+            let epoch = self.startEpoch
 
             guard let binary = [
                 Self.bundledSSHDir + "/dropbear",
@@ -166,7 +170,9 @@ public class SSHManager: ObservableObject {
             }
 
             // 短暂等待后扫进程表确认新实例真的起来了（bind 失败等会在这里现形）
+            // 代际守卫：若用户在这 0.8s 内点了停止，本回调作废（否则会把刚停掉的状态覆盖回"运行中"）
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.8) {
+                guard epoch == self.startEpoch else { return }
                 let pids = Self.findDropbearPids()
                 DispatchQueue.main.async {
                     if pids.isEmpty {
@@ -189,9 +195,13 @@ public class SSHManager: ObservableObject {
 
     public func stop() {
         DispatchQueue.global(qos: .userInitiated).async {
+            self.startEpoch += 1
+            let epoch = self.startEpoch
             let pids = Self.findDropbearPids()
             for p in pids { kill(p, SIGTERM) }
             DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+                // 代际守卫：这 1.5s 内用户若又点了启动，杀尾作废（否则 SIGKILL 误杀新实例）
+                guard epoch == self.startEpoch else { return }
                 let survivors = Self.findDropbearPids()
                 for p in survivors { kill(p, SIGKILL) }
             }
@@ -211,11 +221,10 @@ public class SSHManager: ObservableObject {
         timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
-            // 顺手收尸（若子进程已退出，防僵尸）
-            if self.serverPid > 0 {
-                var st: Int32 = 0
-                _ = waitpid(self.serverPid, &st, WNOHANG)
-            }
+            // 全量收尸：waitpid(-1) 循环收割所有僵尸子进程（spawn 的 dropbear/keygen 残留）
+            // 旧实现 waitpid(serverPid) 因 serverPid 从未赋值而从未生效 → 僵尸积累 + 停止后弹回"运行中"
+            var st: Int32 = 0
+            while waitpid(-1, &st, WNOHANG) > 0 { }
             let pids = Self.findDropbearPids()
             self.runningPids = pids
             self.isRunning = !pids.isEmpty
