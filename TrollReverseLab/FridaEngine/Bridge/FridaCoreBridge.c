@@ -20,6 +20,14 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
+
+static void flog(const char *fmt, ...)
+#if defined(__GNUC__)
+  __attribute__ ((format (printf, 1, 2)))
+#endif
+;
+
 
 static FridaDeviceManager *g_manager = NULL;
 static FridaDevice *g_local_device = NULL;
@@ -80,7 +88,7 @@ static int copy_gerror(char *err, int err_len, GError **errorp)
     // strdup BEFORE free —— 直接引用 (*errorp)->message 拷贝是 use-after-free
     // （v6.4.1 实锤：attach 失败信息变乱码 `@˖B{` 就是读的已释放内存）
     gchar *dup = g_strdup ((*errorp)->message);
-    g_printerr ("[fcb] frida error: %s\n", dup != NULL ? dup : "unknown");
+    flog ("[fcb] frida error: %s\n", dup != NULL ? dup : "unknown");
     g_error_free (*errorp);
     *errorp = NULL;
     int rc = copy_err (err, err_len, dup != NULL ? dup : "unknown frida error");
@@ -145,6 +153,25 @@ static void on_session_detached (FridaSession * session,
   g_idle_add (deliver_detach, note);
 }
 
+// MARK: - 诊断日志（纯 libc，零 GLib 依赖——GLib 引导完成前禁止任何 GLib 调用）
+
+static void flog(const char *fmt, ...)
+#if defined(__GNUC__)
+  __attribute__ ((format (printf, 1, 2)))
+#endif
+;
+
+static void flog(const char *fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  fprintf(stderr, "[fcb] ");
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  va_end(ap);
+  fflush(stderr);
+}
+
 // MARK: - 专用 frida 线程（GLib 首次初始化的唯一现场）
 
 static gpointer loop_thread_func (gpointer user_data)
@@ -154,19 +181,23 @@ static gpointer loop_thread_func (gpointer user_data)
   gint num_devices, i;
   (void) user_data;
 
-  // stderr → 落盘：frida-core 内部诊断（g_printerr）+ [fcb] 行全部可 SSH 旁观
-  //TRL 有 no-sandbox + 绝对路径读写 entitlement，直接写全局 Documents
+  // stderr → 落盘：frida-core 内部诊断 + [fcb] 行全部可 SSH 旁观
+  // 注意：此处只能用纯 libc（flog/fprintf），g_printerr 会首次触碰未引导的
+  // GLib 线程系统 → g_thread_state_add SEGV（v6.4.2 验尸实锤）
   {
     const char *logpath = getenv ("TRL_FRIDA_STDERR_LOG");
     if (logpath == NULL || logpath[0] == '\0')
       logpath = "/var/mobile/Documents/trl_stderr.log";
     if (freopen (logpath, "a", stderr) != NULL)
       setvbuf (stderr, NULL, _IOLBF, 0);
-    g_printerr ("[fcb] === stderr capture started (frida-core %s) ===\n", frida_version_string ());
+    flog ("=== stderr capture started (frida-core %s) ===", frida_version_string ());
   }
 
-  // 顺序铁律：frida_init 必须先于一切 GLib 对象创建，且全部在本线程
+  // 顺序铁律：frida_init 必须是进程内第一个 GLib 调用（引导线程系统），
+  // 且完成前任何其他线程不许碰 GLib（v6.4.1 竞态验尸实锤）
   frida_init ();
+
+  flog ("frida_init done, building main loop");
 
   g_loop = g_main_loop_new (NULL, TRUE);
 
@@ -176,7 +207,7 @@ static gpointer loop_thread_func (gpointer user_data)
   if (error != NULL)
   {
     copy_gerror (NULL, 0, &error);
-    g_printerr ("[fcb] device enumeration failed, loop thread exiting\n");
+    flog ("[fcb] device enumeration failed, loop thread exiting\n");
     note_failed (fcb_last_error ());
     return NULL;
   }
@@ -198,12 +229,12 @@ static gpointer loop_thread_func (gpointer user_data)
   if (g_local_device == NULL)
   {
     copy_err (NULL, 0, "local device not found");
-    g_printerr ("[fcb] no local device, loop thread exiting\n");
+    flog ("[fcb] no local device, loop thread exiting\n");
     note_failed ("local device not found");
     return NULL;
   }
 
-  g_printerr ("[fcb] frida-core %s ready, local device acquired\n", frida_version_string ());
+  flog ("[fcb] frida-core %s ready, local device acquired\n", frida_version_string ());
 
   pthread_mutex_lock(&g_lock);
   g_state = FCB_STATE_READY;
