@@ -145,8 +145,9 @@ public class SSHManager: ObservableObject {
             sigfillset(&sigdef)                                 // 全部恢复默认处置（防继承 SIG_IGN）
             posix_spawnattr_setsigmask(&attrs, &sigmask)
             posix_spawnattr_setsigdefault(&attrs, &sigdef)
-            // SETSIGDEF 0x0004 | SETSIGMASK 0x0008 | CLOEXEC_DEFAULT 0x0040（Darwin 值）
-            posix_spawnattr_setflags(&attrs, Int16(0x0004 | 0x0008 | 0x0040))
+            // SETSIGDEF 0x0004 | SETSIGMASK 0x0008 | CLOEXEC_DEFAULT 0x1000（Darwin spawn_private.h）
+            // ⚠ 0x0040 是 POSIX_SPAWN_SETEXEC（调用进程自杀式 exec）——v6.3.13 黑屏真凶，勿改回
+            posix_spawnattr_setflags(&attrs, Int16(0x0004 | 0x0008 | 0x1000))
 
             var fa: posix_spawn_file_actions_t?
             posix_spawn_file_actions_init(&fa)
