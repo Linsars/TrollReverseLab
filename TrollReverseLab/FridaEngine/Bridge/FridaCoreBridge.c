@@ -31,6 +31,7 @@ static void flog(const char *fmt, ...)
 
 static FridaDeviceManager *g_manager = NULL;
 static FridaDevice *g_local_device = NULL;
+static FridaDevice *g_remote_device = NULL;   // 设备侧 frida-server (127.0.0.1:27042)——root 注入，优先于 local 后端
 static GMainLoop *g_loop = NULL;
 static FridaSession *g_session = NULL;
 static FridaScript *g_script = NULL;
@@ -236,6 +237,25 @@ static gpointer loop_thread_func (gpointer user_data)
 
   flog ("[fcb] frida-core %s ready, local device acquired\n", frida_version_string ());
 
+  // 设备侧 frida-server（127.0.0.1:27042）——root 注入后端，attach 优先走它；
+  // local 后端留作兜底（local 注入需要 .app 内 frida-helper，未打包）
+  GError * remote_error = NULL;
+  g_remote_device = frida_device_manager_add_remote_device_sync (
+      g_manager, "127.0.0.1:27042", NULL, NULL, &remote_error);
+  if (remote_error != NULL)
+  {
+    gchar *rem_dup = g_strdup (remote_error->message);
+    g_error_free (remote_error);
+    flog ("[fcb] remote device (frida-server 27042) unavailable: %s — local backend only\n",
+          rem_dup != NULL ? rem_dup : "unknown");
+    g_free (rem_dup);
+    g_remote_device = NULL;
+  }
+  else
+  {
+    flog ("[fcb] remote device registered: frida-server @ 127.0.0.1:27042\n");
+  }
+
   pthread_mutex_lock(&g_lock);
   g_state = FCB_STATE_READY;
   pthread_mutex_unlock(&g_lock);
@@ -301,7 +321,6 @@ static int fcb_attach_locked (uint32_t pid, char * err, int err_len)
 {
   GError * error = NULL;
   FridaSession * session;
-  FridaDevice * device;
 
   // 引擎层可能重复 attach（新 bridge 实例）——先清干净旧会话
   GError * stale_error = NULL;
@@ -324,14 +343,19 @@ static int fcb_attach_locked (uint32_t pid, char * err, int err_len)
   }
 
   pthread_mutex_lock(&g_lock);
-  device = (g_local_device != NULL) ? g_object_ref (g_local_device) : NULL;
+  FridaDevice * chosen = (g_remote_device != NULL) ? g_object_ref (g_remote_device)
+                                                   : NULL;
+  FridaDevice * local_fallback = NULL;
+  if (chosen == NULL)
+    local_fallback = (g_local_device != NULL) ? g_object_ref (g_local_device) : NULL;
   pthread_mutex_unlock(&g_lock);
 
-  if (device == NULL)
-    return copy_err (err, err_len, "local device not ready");
+  if (chosen == NULL && local_fallback == NULL)
+    return copy_err (err, err_len, "no frida device ready");
 
-  session = frida_device_attach_sync (device, pid, NULL, NULL, &error);
-  g_object_unref (device);
+  session = frida_device_attach_sync (chosen != NULL ? chosen : local_fallback, pid, NULL, NULL, &error);
+  if (chosen != NULL) g_object_unref (chosen);
+  if (local_fallback != NULL) g_object_unref (local_fallback);
   if (error != NULL)
     return copy_gerror (err, err_len, &error);
 
