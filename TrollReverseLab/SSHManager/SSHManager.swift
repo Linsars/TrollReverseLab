@@ -108,11 +108,13 @@ public class SSHManager: ObservableObject {
             // PATH 注入捆绑目录（scp 会话用）
             let env = Self.environWithPrependedPATH(Self.bundledSSHDir)
 
-            // -F 前台 + 纯 posix_spawn（无 SETSID 无 daemonize）：
-            // ① 会话正常关闭——v6.3.10 实测 iOS 上 daemonize 后每连接子进程收不到命令退出信号，
-            //    通道永不 close（客户端挂尾）；-F 模式同二进制 EXIT=0 干净退出
-            // ② app 被杀服务存活——孤儿收养（历史实例 v6.3.2 的 7469 即此形态存活），无需 SETSID
-            // ③ 父进程 = app，monitor waitpid 收尸路径成立
+            // -F 前台 + "出生即干净"的 posix_spawn：
+            // ① 会话正常关闭——app spawn 的继承状态（信号掩码/信号处置/fd 集群）会让 dropbear
+            //    每连接子进程收不到 shell 退出通知（通道永不 close，客户端挂尾）；同二进制手动
+            //    spawn EXIT=0 实锤，故在此重置全部继承变量
+            // ② CLOEXEC_DEFAULT + stdio 重定向：不携带 app 的任何 fd（XPC/管道/句柄）
+            // ③ 无 SETSID 无 daemonize：孤儿收养即可服务存活（7469 幽灵实例实证），
+            //    父进程 = app，monitor waitpid 收尸路径成立
             var pid: pid_t = 0
             let argv: [UnsafeMutablePointer<CChar>?] = [
                 strdup(binary),
@@ -125,7 +127,31 @@ public class SSHManager: ObservableObject {
             ]
             defer { for p in argv { free(p) } }
 
-            let rc = posix_spawn(&pid, binary, nil, nil, argv, env)
+            // Mach 任务异常端口跨 exec 存活：app 侧 crash handler 若注册过 task-level
+            // 异常端口，exec 后的 dropbear 仍带着它们，每连接子进程撞异常时阻塞在
+            // 死端口上永不收尾 → spawn 前清成内核默认（本 app 无需保留自有 crash 端口）
+            _ = task_set_exception_ports(mach_task_self(), exc_mask_t(EXC_MASK_ALL),
+                                         mach_port_t(0), exception_behavior_t(0), thread_state_flavor_t(0))
+
+            var attrs: posix_spawnattr_t?
+            posix_spawnattr_init(&attrs)
+            var sigmask = sigset_t()
+            var sigdef = sigset_t()
+            sigemptyset(&sigmask)                               // 不阻塞任何信号（SIGCHLD 必须能到达）
+            sigfillset(&sigdef)                                 // 全部恢复默认处置（防继承 SIG_IGN）
+            posix_spawnattr_setsigmask(&attrs, &sigmask)
+            posix_spawnattr_setsigdefault(&attrs, &sigdef)
+            // SETSIGDEF 0x0004 | SETSIGMASK 0x0008 | CLOEXEC_DEFAULT 0x0040（Darwin 值）
+            posix_spawnattr_setflags(&attrs, Int16(0x0004 | 0x0008 | 0x0040))
+
+            var fa: posix_spawn_file_actions_t?
+            posix_spawn_file_actions_init(&fa)
+            posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDWR, 0)
+            posix_spawn_file_actions_adddup2(&fa, 0, 1)
+            posix_spawn_file_actions_adddup2(&fa, 0, 2)
+            let rc = posix_spawn(&pid, binary, &fa, &attrs, argv, env)
+            posix_spawn_file_actions_destroy(&fa)
+            posix_spawnattr_destroy(&attrs)
             guard rc == 0 else {
                 DispatchQueue.main.async {
                     self.isRunning = false
