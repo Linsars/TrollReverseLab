@@ -127,11 +127,15 @@ public class SSHManager: ObservableObject {
             ]
             defer { for p in argv { free(p) } }
 
-            // Mach 任务异常端口跨 exec 存活：app 侧 crash handler 若注册过 task-level
-            // 异常端口，exec 后的 dropbear 仍带着它们，每连接子进程撞异常时阻塞在
-            // 死端口上永不收尾 → spawn 前清成内核默认（本 app 无需保留自有 crash 端口）
-            _ = task_set_exception_ports(mach_task_self(), exc_mask_t(EXC_MASK_ALL),
-                                         mach_port_t(0), exception_behavior_t(0), thread_state_flavor_t(0))
+            // Mach 任务异常端口跨 exec 存活：spawn 前清回内核默认（0x7FE = 异常 1-10 全覆盖，含 CRASH）。
+            // dlsym 零头文件依赖（Swift 不暴露 mach 符号）；符号缺失则静默跳过。
+            typealias TaskSetExcPorts = @convention(c) (UInt32, UInt32, UInt32, UInt32, UInt32) -> Int32
+            if let h = dlopen(nil, RTLD_LAZY), let sym = dlsym(h, "task_set_exception_ports") {
+                let fn = unsafeBitCast(sym, to: TaskSetExcPorts.self)
+                let selfTask = dlsym(h, "mach_task_self_")
+                    .map { unsafeBitCast($0, to: UnsafePointer<UInt32>.self).pointee } ?? 0
+                _ = fn(selfTask, 0x7FE, 0, 0, 0)
+            }
 
             var attrs: posix_spawnattr_t?
             posix_spawnattr_init(&attrs)
