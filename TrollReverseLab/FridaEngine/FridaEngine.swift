@@ -110,6 +110,7 @@ public final class FridaEngine: ObservableObject {
     public func attach(to process: LocalProcess) {
         state = .connecting
         currentProcess = process
+        diskLog("[ATTACH] request: \(process.name) pid=\(process.pid)")
 
         // Initialize bridge connection to frida-gadget
         bridge = FridaBridge()
@@ -153,6 +154,7 @@ public final class FridaEngine: ObservableObject {
                     self?.logOutput(output)
                     self?.loadedScripts.append(DebugScript(name: name, content: script, executionCount: 1))
                     self?.state = .scriptLoaded(scriptName: name)
+                    self?.archiveScript(script, name: name)
                 case .failure(let error):
                     self?.logError("Script error: \(error.localizedDescription)")
                 }
@@ -237,16 +239,43 @@ public final class FridaEngine: ObservableObject {
 
     // MARK: - Console Output
 
+    /// 磁盘日志：Documents/trl_frida.log —— SSH 远程旁观 Frida 调试全过程的落盘面
+    private func diskLog(_ text: String) {
+        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+        let path = docs + "/trl_frida.log"
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil, attributes: nil)
+        }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MM-dd HH:mm:ss.SSS"
+        let line = "[\(fmt.string(from: Date()))] \(text)\n"
+        if let fh = FileHandle(forWritingAtPath: path) {
+            _ = try? fh.seekToEnd()
+            fh.write(line.data(using: .utf8)!)
+            try? fh.close()
+        }
+    }
+
+    /// 最新执行的脚本存档：Documents/trl_last_script.js（覆盖式，SSH 可直接 cat）
+    private func archiveScript(_ script: String, name: String) {
+        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+        let header = "// name: \(name)\n// archived: \(Date())\n"
+        try? (header + script + "\n").write(toFile: docs + "/trl_last_script.js", atomically: true, encoding: .utf8)
+    }
+
     private func logInfo(_ message: String) {
         consoleOutput.append(ConsoleMessage(type: .info, text: message, timestamp: Date()))
+        diskLog("[INFO] \(message)")
     }
 
     private func logError(_ message: String) {
         consoleOutput.append(ConsoleMessage(type: .error, text: message, timestamp: Date()))
+        diskLog("[ERR ] \(message)")
     }
 
     private func logOutput(_ output: String) {
         consoleOutput.append(ConsoleMessage(type: .output, text: output, timestamp: Date()))
+        diskLog("[OUT ] \(output)")
     }
 
     public func clearConsole() {
