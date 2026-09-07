@@ -404,7 +404,8 @@ static int fcb_load_script_locked (const char * source, char * err, int err_len)
 
   options = frida_script_options_new ();
   frida_script_options_set_name (options, "trl");
-  frida_script_options_set_runtime (options, FRIDA_SCRIPT_RUNTIME_QJS);
+  // V8 runtime：QJS 无 ObjC/Java 桥（ObjC undefined），V8 全桥 + 完整 ES 支持
+  frida_script_options_set_runtime (options, FRIDA_SCRIPT_RUNTIME_V8);
 
   script = frida_session_create_script_sync (session, source, options, NULL, &error);
   g_clear_object (&options);

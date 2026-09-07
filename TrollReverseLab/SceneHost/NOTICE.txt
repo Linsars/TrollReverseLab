@@ -1,0 +1,19 @@
+ImmortalizerTS
+Copyright (C) 2025 Serge Alagon
+https://github.com/sergealagon/ImmortalizerTS
+
+This product includes source code derived from ImmortalizerTS, distributed
+under the GNU General Public License v3 (see LICENSE in the original
+repository). Files taken verbatim from that project:
+
+  - PrivateHeaders.h          (iOS private framework headers)
+  - ExternalAppSceneView.m/h  (floating host window over SpringBoard)
+
+AppSceneHost.m ports the scene hosting sequence
+(ViewController.initializeNewSceneForBundleId, FBProcessManager launch
+transaction, FBSceneManager scene creation, multi-scene detection) from
+ImmortalizerTS with modifications for the TrollReverseLab workflow.
+
+The original project also credits:
+  @khanhduytran0's FrontBoardAppLauncher
+  https://github.com/khanhduytran0/FrontBoardAppLauncher

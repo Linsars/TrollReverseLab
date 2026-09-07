@@ -46,6 +46,8 @@ public struct LocalProcess: Identifiable, Hashable {
     public let name: String
     public let bundleIdentifier: String?
     public let pid: Int32
+    /// 进程活性：nil=活（SRUN/SIDL/SWAIT/SLEEP），"zombie"=僵尸（SZOMB=6）
+    public let statFlag: String?
 }
 
 /// State of the Frida debugging session.
@@ -55,6 +57,8 @@ public enum FridaSessionState: Equatable {
     case attached(processName: String)
     case scriptLoaded(scriptName: String)
     case error(message: String)
+    /// 目标进程被系统回收/连接被掐——不是用户主动 detach，UI 要大字报
+    case terminated(processName: String, reason: String)
 }
 
 /// Manages Frida gadget communication for local process debugging.
@@ -71,8 +75,13 @@ public final class FridaEngine: ObservableObject {
 
     @Published public var selectedTargetApp: TrollStoreApp?
 
+    /// 当前 attach 的目标（UI 顶栏显示用）
+    @Published public private(set) var currentTarget: LocalProcess?
+
     private var currentProcess: LocalProcess?
     private var bridge: FridaBridge?
+    /// 用户主动 detach 标记——区分"我自己断开"与"目标被系统杀"（后者要大字报）
+    private var userInitiatedDetach = false
 
     public init() {}
 
@@ -87,6 +96,7 @@ public final class FridaEngine: ObservableObject {
 
     /// Real process enumeration via sysctl KERN_PROC_ALL.
     /// Same proven pattern as SSHManager.findDropbearPids (mib len 3, SZOMB=6 filter).
+    /// 僵尸进程不再静默丢弃——标 "zombie" 灰显，用户看得见尸体才不会选尸体
     public func listTrollProcesses() -> [LocalProcess] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
         var size = 0
@@ -97,12 +107,14 @@ public final class FridaEngine: ObservableObject {
         var result: [LocalProcess] = []
         for entry in procs {
             let pid = entry.kp_proc.p_pid
-            guard pid > 1, entry.kp_proc.p_stat != 0, entry.kp_proc.p_stat != 6 else { continue }  // 僵尸不上报
+            guard pid > 1, entry.kp_proc.p_stat != 0 else { continue }
+            let isZombie = entry.kp_proc.p_stat == 6   // SZOMB
             let comm = withUnsafeBytes(of: entry.kp_proc.p_comm) { buf -> String in
                 String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
             }
             guard !comm.isEmpty else { continue }
-            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid))
+            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid,
+                                       statFlag: isZombie ? "zombie" : nil))
         }
         return result.sorted { $0.pid < $1.pid }
     }
@@ -120,6 +132,7 @@ public final class FridaEngine: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if success {
+                    self.currentTarget = process
                     self.state = .attached(processName: process.name)
                     self.logInfo("Attached to \(process.name) (PID: \(process.pid))")
                     self.sshManager.start()
@@ -132,12 +145,59 @@ public final class FridaEngine: ObservableObject {
         }
     }
 
-    /// Detaches from the current process.
+    // MARK: - Scene-Host 真后台集成（ImmortalizerTS 机制移植）
+    //
+    // 选 app = 真后台托管启动（目标前台 scene 挂在 TRL root 窗口，不被 jetsam 杀）
+    //          + 自动 frida attach。TRL 自己也因 root 窗口在场而自驻。
+
+    /// 当前托管中的 app bundleId（nil = 无托管）
+    private var hostedBundleId: String?
+
+    /// 托管启动 + 自动 attach（Frida 面板 + 按钮的主流程）
+    public func hostAndAttach(bundleId: String, appName: String) {
+        state = .connecting
+        logInfo("真后台启动: \(appName)（scene 托管中...）")
+        let host = AppSceneHost.shared()
+        host.hostAppWithBundleId(bundleId, appName: appName, ready: { [weak self] pid, bid, name in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.logInfo("真后台托管完成: \(name) PID=\(pid)")
+                let proc = LocalProcess(id: pid, name: name, bundleIdentifier: bid,
+                                        pid: pid, statFlag: nil)
+                self.hostedBundleId = bid
+                self.attach(to: proc)
+            }
+        }, fail: { [weak self] message in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.state = .error(message: message)
+                self.logError("真后台托管失败: \(message)")
+            }
+        })
+    }
+
+    /// 释放目标：销毁托管场景 + 杀进程（= 用户划掉语义）
+    public func releaseHostedApp() {
+        guard let bid = hostedBundleId else { return }
+        let name = AppSceneHost.shared().hostedAppName(bid) ?? bid
+        userInitiatedDetach = true
+        bridge?.detach()
+        bridge = nil
+        currentProcess = nil
+        currentTarget = nil
+        state = .disconnected
+        AppSceneHost.shared().releaseAppWithBundleId(bid)
+        hostedBundleId = nil
+        logInfo("已关闭目标: \(name)（托管释放 + 进程终止）")
+    }
+
+    /// Detaches frida from the current process（目标保持真后台运行）.
     public func detach() {
+        userInitiatedDetach = true   // 标记：下面 bridgeDidDetach 里的死讯不算这一笔
         bridge?.detach()
         currentProcess = nil
         state = .disconnected
-        logInfo("Detached from process")
+        logInfo("Detached from process（目标保持真后台运行）")
     }
 
     // MARK: - Script Inbox（SSH 自动驾驶总线）
@@ -359,9 +419,23 @@ extension FridaEngine: FridaBridgeDelegate {
 
     public func bridgeDidDetach(_ bridge: FridaBridge, reason: Int32) {
         DispatchQueue.main.async {
-            self.diskLog("[DETACH] session detached: \(FridaBridge.detachReasonName(reason))")
-            self.state = .disconnected
-            self.logInfo("Session detached: \(FridaBridge.detachReasonName(reason))")
+            let reasonName = FridaBridge.detachReasonName(reason)
+            self.diskLog("[DETACH] session detached: \(reasonName)")
+
+            // 用户主动 detach → 静默回 disconnected；其余全是死讯，大字报伺候
+            if self.userInitiatedDetach {
+                self.userInitiatedDetach = false
+                self.currentTarget = nil
+                self.state = .disconnected
+                self.logInfo("Session detached: \(reasonName)")
+                return
+            }
+
+            let targetName = self.currentProcess?.name ?? "目标"
+            self.currentProcess = nil
+            self.currentTarget = nil
+            self.state = .terminated(processName: targetName, reason: reasonName)
+            self.logError("⚠️ \(targetName) 已失联（\(reasonName)）——目标进程可能已被系统回收")
         }
     }
 }

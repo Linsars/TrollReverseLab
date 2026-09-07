@@ -16,21 +16,23 @@ import SwiftUI
 
 struct FridaDebugView: View {
     @EnvironmentObject var fridaEngine: FridaEngine
-    @EnvironmentObject var appScanner: AppScannerViewModel
     @State private var scriptInput = ""
     @State private var scriptName = ""
-    @State private var showProcessPicker = false
-    @State private var selectedProcess: LocalProcess?
+    @State private var showHostAppPicker = false
     @State private var showScriptLibrary = false
-    @State private var showAppPicker = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Target app status bar
-                TargetAppBar(targetApp: fridaEngine.selectedTargetApp)
+                // 当前托管目标栏
+                TargetAppBar(target: fridaEngine.currentTarget)
 
                 Divider()
+
+                // 目标死讯大字报
+                if case .terminated(let procName, let reason) = fridaEngine.state {
+                    DeathNoticeBar(processName: procName, reason: reason)
+                }
 
                 // Connection status bar
                 ConnectionStatusBar(state: fridaEngine.state)
@@ -45,7 +47,6 @@ struct FridaDebugView: View {
                 // Console output
                 ConsoleOutputView(messages: fridaEngine.consoleOutput)
                     .frame(maxHeight: .infinity)
-
                 Divider()
 
                 // Script input area
@@ -67,6 +68,14 @@ struct FridaDebugView: View {
             .navigationTitle("Frida 调试")
             .navigationBarItems(
                 trailing: HStack {
+                    // 主入口：选 app 真后台启动 + 自动 attach
+                    Button {
+                        showHostAppPicker = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                    }
+
                     Button {
                         showScriptLibrary = true
                     } label: {
@@ -75,21 +84,18 @@ struct FridaDebugView: View {
 
                     Menu {
                         Button {
-                            showAppPicker = true
-                        } label: {
-                            Label("选择目标应用", systemImage: "app.badge.checkmark")
-                        }
-
-                        Button {
-                            showProcessPicker = true
-                        } label: {
-                            Label("选择应用进程", systemImage: "dot.radiowaves.left.and.right")
-                        }
-
-                        Button {
                             fridaEngine.detach()
                         } label: {
-                            Label("断开连接", systemImage: "xmark.circle")
+                            Label("断开 frida（app 继续运行）", systemImage: "xmark.circle")
+                        }
+
+                        if fridaEngine.currentTarget != nil {
+                            Button {
+                                fridaEngine.releaseHostedApp()
+                            } label: {
+                                Label("关闭目标 app", systemImage: "power")
+                                    .foregroundColor(.red)
+                            }
                         }
 
                         Button {
@@ -103,42 +109,35 @@ struct FridaDebugView: View {
                     }
                 }
             )
-            .sheet(isPresented: $showProcessPicker) {
-                ProcessPickerView(
+            .sheet(isPresented: $showHostAppPicker) {
+                HostAppPickerView(
                     fridaEngine: fridaEngine,
-                    selectedProcess: $selectedProcess,
-                    isPresented: $showProcessPicker
+                    isPresented: $showHostAppPicker
                 )
             }
             .sheet(isPresented: $showScriptLibrary) {
                 ScriptLibraryView(fridaEngine: fridaEngine)
             }
-            .sheet(isPresented: $showAppPicker) {
-                AppPickerView(
-                    apps: appScanner.apps,
-                    selectedApp: $fridaEngine.selectedTargetApp,
-                    isPresented: $showAppPicker
-                )
-            }
         }
     }
 }
 
-/// Shows the currently selected target TrollStore app.
+/// 当前托管目标栏
 struct TargetAppBar: View {
-    let targetApp: TrollStoreApp?
+    let target: LocalProcess?
 
     var body: some View {
         HStack(spacing: 10) {
-            if let app = targetApp {
-                AppIconView(bundlePath: app.bundlePath)
-                    .frame(width: 36, height: 36)
+            if let t = target {
+                Image(systemName: "hourglass.circle.fill")
+                    .font(.title2)
+                    .foregroundColor(.green)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(app.displayName)
+                    Text(t.name)
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text(app.bundleIdentifier)
+                    Text("PID \(t.pid) · 真后台常驻")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -147,7 +146,7 @@ struct TargetAppBar: View {
                 Image(systemName: "target")
                     .font(.title3)
                     .foregroundColor(.secondary)
-                Text("未选择目标应用")
+                Text("点右上角 + 选 app → 真后台启动 → 自动 attach")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -157,6 +156,93 @@ struct TargetAppBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(.secondarySystemBackground))
+    }
+}
+
+/// 选 app 真后台托管 + frida attach（唯一目标入口）
+struct HostAppPickerView: View {
+    @ObservedObject var fridaEngine: FridaEngine
+    @Binding var isPresented: Bool
+    @State private var searchText = ""
+    @State private var apps: [SceneHostApp] = []
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                SearchBar(text: $searchText)
+                    .padding(8)
+
+                List(filteredApps, id: \.bundleId) { app in
+                    Button {
+                        isPresented = false
+                        fridaEngine.hostAndAttach(bundleId: app.bundleId, appName: app.name)
+                    } label: {
+                        HStack(spacing: 12) {
+                            if let icon = AppSceneHost.shared().iconForBundleId(app.bundleId) {
+                                Image(uiImage: icon)
+                                    .resizable()
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(app.name)
+                                    .font(.body)
+                                Text(app.bundleId)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "hourglass")
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("选 app 真后台 + frida")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(
+                leading: Button("取消") { isPresented = false }
+            )
+            .onAppear {
+                apps = AppSceneHost.shared().installedApps()
+            }
+        }
+    }
+
+    private var filteredApps: [SceneHostApp] {
+        if searchText.isEmpty { return apps }
+        return apps.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            $0.bundleId.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+}
+
+/// 目标死讯大字报——进程被系统回收/连接被掐时的醒目横幅
+struct DeathNoticeBar: View {
+    let processName: String
+    let reason: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title2)
+                .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("目标进程已被系统回收")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                Text("\(processName) 已失联（\(reason)）——iOS 后台 app 会被 jetsam 杀掉，请保持目标在前台后重新附加")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.red)
     }
 }
 
@@ -187,16 +273,18 @@ struct ConnectionStatusBar: View {
         case .connecting: return .orange
         case .attached: return .green
         case .scriptLoaded: return .blue
+        case .terminated: return .red
         case .error: return .red
         }
     }
 
     private var statusText: String {
         switch state {
-        case .disconnected: return "未连接 — 请选择应用进程"
+        case .disconnected: return "未连接 — 请选择目标进程"
         case .connecting: return "正在连接..."
-        case .attached(let name): return "已附加: \(name)"
-        case .scriptLoaded(let name): return "脚本已加载: \(name)"
+        case .attached(let name): return "已附加: \(name) — 脚本未加载，正常状态"
+        case .scriptLoaded(let name): return "脚本已加载: \(name) — 会话继续可用，非断开"
+        case .terminated(let name, let reason): return "⚠️ 目标已死: \(name)（\(reason)）"
         case .error(let msg): return "错误: \(msg)"
         }
     }
@@ -224,6 +312,13 @@ struct ConsoleOutputView: View {
 
 struct ConsoleMessageView: View {
     let message: ConsoleMessage
+    @State private var isExpanded = false
+
+    /// 超过这个行数/字符数 = 折叠成卡片
+    private static let collapseLineCount = 6
+    private static let expandCharThreshold = 600
+    /// 展开后的卡片最大高度（超高内容卡片内滚动）
+    private static let expandedMaxHeight: CGFloat = 320
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -238,10 +333,54 @@ struct ConsoleMessageView: View {
                 .foregroundColor(color)
                 .frame(width: 40, alignment: .leading)
 
-            Text(message.text)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundColor(color)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if isExpandable && !isExpanded {
+                    // 截断卡片：前 N 行 + 展开提示
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(collapsedText)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.down")
+                            Text("已截断 · 全文 \(lineCount) 行 \(message.text.count) 字符 · 点开查看")
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                    }
+                    .padding(8)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onTapGesture { isExpanded = true }
+                } else if isExpandable {
+                    // 展开卡片：内部滚动 + 收起
+                    VStack(alignment: .leading, spacing: 4) {
+                        ScrollView {
+                            Text(message.text)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(color)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                        }
+                        .frame(maxHeight: Self.expandedMaxHeight)
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.up")
+                            Text("收起")
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                    }
+                    .padding(8)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onTapGesture { isExpanded = false }
+                } else {
+                    Text(message.text)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
         .padding(.vertical, 1)
     }
@@ -266,6 +405,20 @@ struct ConsoleMessageView: View {
         case .error: return .red
         case .output: return .primary
         }
+    }
+
+    private var lines: [String] {
+        message.text.components(separatedBy: .newlines)
+    }
+
+    private var lineCount: Int { lines.count }
+
+    private var isExpandable: Bool {
+        lineCount > Self.collapseLineCount || message.text.count > Self.expandCharThreshold
+    }
+
+    private var collapsedText: String {
+        lines.prefix(Self.collapseLineCount).joined(separator: "\n")
     }
 }
 
@@ -320,93 +473,6 @@ struct ScriptInputArea: View {
     }
 }
 
-/// Process picker sheet for selecting which app to attach to.
-struct ProcessPickerView: View {
-    @ObservedObject var fridaEngine: FridaEngine
-    @Binding var selectedProcess: LocalProcess?
-    @Binding var isPresented: Bool
-
-    @State private var processes: [LocalProcess] = []
-    @State private var searchText = ""
-
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // Search bar
-                SearchBar(text: $searchText)
-                    .padding(8)
-
-                // Process list
-                if processes.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "ladybug")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("暂无可附加进程")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text("Frida-gadget 未运行或无可附加的 TrollStore 应用进程")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(filteredProcesses, id: \.id) { process in
-                        Button {
-                            selectedProcess = process
-                            fridaEngine.attach(to: process)
-                            isPresented = false
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(process.name)
-                                        .font(.body)
-                                    Text("PID: \(process.pid)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "link.badge.plus")
-                                    .foregroundColor(.accentColor)
-                            }
-                        }
-                    }
-                }
-
-                // Security notice
-                HStack {
-                    Image(systemName: "lock.shield")
-                        .foregroundColor(.green)
-                    Text("仅可附加用户自选的 TrollStore 应用进程")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-            }
-            .navigationTitle("选择应用进程")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarItems(
-                leading: Button("取消") { isPresented = false }
-            )
-            .onAppear {
-                processes = fridaEngine.listAttachableProcesses()
-            }
-        }
-    }
-
-    private var filteredProcesses: [LocalProcess] {
-        if searchText.isEmpty {
-            return processes
-        }
-        return processes.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) ||
-            ($0.bundleIdentifier?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
-}
 
 /// Local script library view — shows saved Lua/Frida JS scripts.
 struct ScriptLibraryView: View {
