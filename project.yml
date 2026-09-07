@@ -46,7 +46,7 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: TrollReverseLab/TrollReverseLab-Bridging-Header.h
         HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/Vendor/FridaCore $(PROJECT_DIR)/TrollReverseLab/FridaEngine/Bridge"
         LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/Vendor/FridaCore"
-        OTHER_LDFLAGS: "-ObjC -lsqlite3 -lfrida-core -lbsm -lresolv -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework UIKit -F$(SDKROOT)/System/Library/PrivateFrameworks -framework FrontBoard -framework RunningBoardServices -framework BackBoardServices -framework SpringBoardServices"
+        OTHER_LDFLAGS: "-ObjC -lsqlite3 -lfrida-core -lbsm -lresolv -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework UIKit -F$(PROJECT_DIR)/Vendor/PrivateFWStubs -framework FrontBoard -framework RunningBoardServices -framework BackBoardServices -framework SpringBoardServices -undefined dynamic_lookup"
     entitlements:
       path: TrollReverseLab/TrollReverseLab.entitlements
     info:

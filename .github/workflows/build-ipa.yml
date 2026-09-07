@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-ipa:
     name: Build IPA on macOS
-    runs-on: macos-14  # Xcode 15.4 / iOS 17.5 SDK —— SDK 仍含 PrivateFrameworks（Xcode 16+ 的 SDK 已删除，私有框架链接在 macos-15 上走不通）
+    runs-on: macos-15  # 主机 /System/Library/PrivateFrameworks 含 FB/RBS/BB/SBS（iOS SDK 15+ 已删 PrivateFrameworks，主机框架+dynamic_lookup 是终解）
 
     steps:
       - name: Checkout repository
@@ -45,6 +45,26 @@ jobs:
           fi
           file Vendor/FridaCore/libfrida-core.a
           ls -la Vendor/FridaCore/
+
+      - name: Dump private framework tbds (macOS host frameworks → Apple 格式 TBD)
+        # iOS SDK（Xcode 15/16+）都删了 PrivateFrameworks；macOS 主机有同 install-name 的 4 个框架，
+        # 用 Xcode 自带 tapi-tbd 导出真格式 TBD（含完整符号表），平台字段改 ios，链接只取符号+install-name
+        run: |
+          set -e
+          TAPI="$(xcode-select -p)/usr/bin/tapi-tbd"
+          [ -x "$TAPI" ] || { echo "tapi-tbd not found"; exit 1; }
+          mkdir -p Vendor/PrivateFWStubs
+          for fw in FrontBoard RunningBoardServices BackBoardServices SpringBoardServices; do
+            SRC="/System/Library/PrivateFrameworks/$fw.framework/$fw"
+            [ -f "$SRC" ] || { echo "host framework missing: $SRC"; exit 1; }
+            mkdir -p "Vendor/PrivateFWStubs/$fw.framework"
+            "$TAPI" --emit-tbd-from-mach-o "$SRC" -o "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
+            # 平台字段 macos → ios（v3 的 platform: 行 / v4 的 -macos 后缀）
+            sed -i '' -e 's/^platform: .*$/platform: ios/' -e 's/-macos/-ios/g' "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
+            echo "== $fw.tbd head =="
+            head -8 "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
+          done
+          ls -la Vendor/PrivateFWStubs/
 
       - name: Install xcodegen
         run: |
