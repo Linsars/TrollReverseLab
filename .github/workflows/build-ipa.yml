@@ -46,9 +46,13 @@ jobs:
           file Vendor/FridaCore/libfrida-core.a
           ls -la Vendor/FridaCore/
 
-      - name: Dump private framework tbds (macOS host frameworks → Apple 格式 TBD)
-        # iOS SDK（Xcode 15/16+）都删了 PrivateFrameworks；macOS 主机有同 install-name 的 4 个框架，
-        # 用 Xcode 自带 tapi-tbd 导出真格式 TBD（含完整符号表），平台字段改 ios，链接只取符号+install-name
+      - name: Dump private framework tbds (macOS host -> Apple tbd)
+        # iOS SDK (Xcode 15/16+) have removed PrivateFrameworks; the macOS host has 4
+        # frameworks with the identical install-name. Xcode's tapi-tbd exports them
+        # as real Apple-format TBDs (full symbol table + install-name), platform field
+        # sed-ed to ios, so linking only takes symbols + install-name. UIRootSceneWindow
+        # etc. (UIKit private classes) are resolved at runtime via -undefined dynamic_lookup
+        # and the dlopen hook already present in AppSceneHost.m.
         run: |
           set -e
           TAPI="$(xcode-select -p)/usr/bin/tapi-tbd"
