@@ -55,15 +55,16 @@ jobs:
         # and the dlopen hook already present in AppSceneHost.m.
         run: |
           set -e
-          TAPI="$(xcode-select -p)/usr/bin/tapi-tbd"
-          [ -x "$TAPI" ] || { echo "tapi-tbd not found"; exit 1; }
+          TAPI="$(xcrun -sdk iphoneos --find tapi-tbd 2>/dev/null || xcrun -sdk macosx --find tapi-tbd 2>/dev/null || xcrun --find tapi-tbd 2>/dev/null || echo '')"
+          [ -n "$TAPI" ] || { echo "tapi-tbd not found"; exit 1; }
+          echo "tapi-tbd: $TAPI"
           mkdir -p Vendor/PrivateFWStubs
           for fw in FrontBoard RunningBoardServices BackBoardServices SpringBoardServices; do
             SRC="/System/Library/PrivateFrameworks/$fw.framework/$fw"
             [ -f "$SRC" ] || { echo "host framework missing: $SRC"; exit 1; }
             mkdir -p "Vendor/PrivateFWStubs/$fw.framework"
             "$TAPI" --emit-tbd-from-mach-o "$SRC" -o "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
-            # 平台字段 macos → ios（v3 的 platform: 行 / v4 的 -macos 后缀）
+            # platform field: macos -> ios (v3 'platform:' line / v4 '-macos' suffix)
             sed -i '' -e 's/^platform: .*$/platform: ios/' -e 's/-macos/-ios/g' "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
             echo "== $fw.tbd head =="
             head -8 "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
