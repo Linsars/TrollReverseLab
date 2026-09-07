@@ -158,7 +158,7 @@ public final class FridaEngine: ObservableObject {
         state = .connecting
         logInfo("真后台启动: \(appName)（scene 托管中...）")
         let host = AppSceneHost.shared()
-        host.hostAppWithBundleId(bundleId, appName: appName, ready: { [weak self] pid, bid, name in
+        host.hostApp(withBundleId: bundleId, appName: appName, ready: { [weak self] pid, bid, name in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.logInfo("真后台托管完成: \(name) PID=\(pid)")

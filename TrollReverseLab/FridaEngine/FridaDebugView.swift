@@ -178,12 +178,11 @@ struct HostAppPickerView: View {
                         fridaEngine.hostAndAttach(bundleId: app.bundleId, appName: app.name)
                     } label: {
                         HStack(spacing: 12) {
-                            if let icon = AppSceneHost.shared().icon(forBundleId: app.bundleId) {
-                                Image(uiImage: icon)
-                                    .resizable()
-                                    .frame(width: 40, height: 40)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
+                            Image(uiImage: AppSceneHost.shared().icon(forBundleId: app.bundleId)
+                                     ?? UIImage(systemName: "app")!)
+                                .resizable()
+                                .frame(width: 40, height: 40)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(app.name)
                                     .font(.body)
