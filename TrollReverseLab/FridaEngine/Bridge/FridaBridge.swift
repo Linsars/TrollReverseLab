@@ -93,7 +93,7 @@ public final class FridaBridge {
                 String(cString: buf.baseAddress!.assumingMemoryBound(to: CChar.self))
             }
             guard !comm.isEmpty else { continue }
-            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid))
+            result.append(LocalProcess(id: pid, name: comm, bundleIdentifier: nil, pid: pid, statFlag: nil))
         }
         return result.sorted { $0.pid < $1.pid }
     }

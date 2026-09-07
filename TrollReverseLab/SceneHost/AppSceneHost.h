@@ -13,6 +13,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 NS_SWIFT_NAME(SceneHostApp)
 @interface SceneHostApp : NSObject
 @property (nonatomic, copy) NSString *bundleId;
@@ -49,6 +51,8 @@ NS_SWIFT_NAME(AppSceneHost)
 
 - (int32_t)pidForBundleId:(NSString *)bundleId;
 - (BOOL)isHosted:(NSString *)bundleId;
-- (NSString *)hostedAppName:(NSString *)bundleId;
+- (nullable NSString *)hostedAppName:(NSString *)bundleId;
 
 @end
+
+NS_ASSUME_NONNULL_END

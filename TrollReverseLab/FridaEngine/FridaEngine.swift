@@ -186,7 +186,7 @@ public final class FridaEngine: ObservableObject {
         currentProcess = nil
         currentTarget = nil
         state = .disconnected
-        AppSceneHost.shared().releaseAppWithBundleId(bid)
+        AppSceneHost.shared().releaseApp(withBundleId: bid)
         hostedBundleId = nil
         logInfo("已关闭目标: \(name)（托管释放 + 进程终止）")
     }
