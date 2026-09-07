@@ -46,42 +46,6 @@ jobs:
           file Vendor/FridaCore/libfrida-core.a
           ls -la Vendor/FridaCore/
 
-      - name: Build private framework tbd stubs from real SDK tbd template
-        # iOS SDK 没有 PrivateFrameworks 目录；macOS 主机有同 install-name 的框架。
-        # 不手写 tbd 格式 —— 拷贝 SDK 里现成的真 tbd 当模板（ld64 必认），只改
-        # install-name 指向私有框架路径 + 清空符号（-undefined dynamic_lookup 兜底）。
-        run: |
-          set -e
-          SDK_PATH="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
-          TEMPLATE="$(find "$SDK_PATH/usr/lib" -name '*.tbd' -maxdepth 1 | head -1)"
-          [ -n "$TEMPLATE" ] || { echo "no tbd template found in SDK"; exit 1; }
-          echo "template: $TEMPLATE"
-          mkdir -p Vendor/PrivateFWStubs
-          for fw in FrontBoard RunningBoardServices BackBoardServices SpringBoardServices; do
-            mkdir -p "Vendor/PrivateFWStubs/$fw.framework"
-            cp "$TEMPLATE" "Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
-            PLIST="Vendor/PrivateFWStubs/$fw.framework/$fw.tbd"
-            # 改 install-name 指向私有框架（macOS 主机同路径，iOS 侧 dyld 按同名找）
-            sed -i '' "s|/usr/lib/[^\"']*|$fw.framework/$fw|g; s|/System/Library/Frameworks/[^\"']*|$fw.framework/$fw|g" "$PLIST" 2>/dev/null || true
-            # 若模板是 YAML tapi-tbd 格式，直接重写 install-name
-            if grep -q "install-name" "$PLIST"; then
-              # v4 YAML: install-name:    '/usr/lib/xxx'
-              python3 -c "
-import re, sys
-p = '$PLIST'
-s = open(p).read()
-s = re.sub(r\"install-name:\s*'[^']*'\", \"install-name:    '/System/Library/PrivateFrameworks/$fw.framework/$fw'\", s)
-s = re.sub(r'install-name:\s*\"[^\"]*\"', \"install-name:    '/System/Library/PrivateFrameworks/$fw.framework/$fw'\", s)
-# 清空 exports/symbols 段（dynamic_lookup 兜底）—— 若有这些 key 则删到下一个同级 key
-s = re.sub(r'(exports|undefineds|reexported-libraries):.*?(?=\n[a-z-]+:|\Z)', '', s, flags=re.DOTALL)
-open(p, 'w').write(s)
-"
-            fi
-            echo "== $fw.tbd =="
-            head -12 "$PLIST"
-          done
-          ls -la Vendor/PrivateFWStubs/
-
       - name: Install xcodegen
         run: |
           brew install xcodegen
