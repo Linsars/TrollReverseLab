@@ -71,6 +71,12 @@ jobs:
                    "$B/frida-server" "$B/frida-inject"; do
             if [ -f "$f" ]; then cp "$f" /tmp/assets/; fi
           done
+          # make install 只装目标清单里的东西——helper 不在默认 install 集，直接从 build 树捞
+          if [ ! -f /tmp/assets/frida-helper ]; then
+            H=$(find /tmp/frida/build -name "frida-helper*" -type f | grep -v arm64e | grep -v "\.p$" | head -1)
+            echo "helper from build tree: $H"
+            [ -n "$H" ] && cp "$H" /tmp/assets/frida-helper
+          fi
           file /tmp/assets/* || true
           # 主构建预期符号核查：helper 必须是 ios arm64
           file /tmp/assets/frida-helper
@@ -87,6 +93,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          # gh 需要 git 仓库上下文定位 repo——本 job 不 checkout，显式指定
+          export GH_REPO="$GITHUB_REPOSITORY"
           TAG="frida-assets-17.17.0"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Frida iOS arm64 assets (built from frida 17.17.0)" \
