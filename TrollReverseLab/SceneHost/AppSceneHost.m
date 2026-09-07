@@ -13,6 +13,7 @@
 #import "ExternalAppSceneView.h"
 #include <signal.h>
 #include <sys/wait.h>
+#include <dlfcn.h>
 
 // 包内版本标记串（IPA 验证用，与 project.yml MARKETING_VERSION 对应）
 static const char *kSceneHostVersion = "scene-host-6.4.7";
@@ -38,10 +39,27 @@ static const char *kSceneHostVersion = "scene-host-6.4.7";
 
 @implementation AppSceneHost
 
+/* Xcode 16 的 iOS SDK 删了 PrivateFrameworks——链接走空壳 TBD stub + dynamic_lookup，
+   运行时先把 4 个私有框架 dlopen 进来，_OBJC_CLASS_$_ 引用才能在首次使用时解析 */
+static void loadPrivateFrameworks(void) {
+    static const char *paths[] = {
+        "/System/Library/PrivateFrameworks/FrontBoard.framework/FrontBoard",
+        "/System/Library/PrivateFrameworks/RunningBoardServices.framework/RunningBoardServices",
+        "/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices",
+        "/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices",
+    };
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        (void)dlopen(paths[i], RTLD_LAZY);   // 失败容忍（私有类引用处有 nil 检查）
+    }
+}
+
 + (instancetype)shared {
     static AppSceneHost *instance;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ instance = [[AppSceneHost alloc] init]; });
+    dispatch_once(&once, ^{
+        instance = [[AppSceneHost alloc] init];
+        loadPrivateFrameworks();
+    });
     return instance;
 }
 
