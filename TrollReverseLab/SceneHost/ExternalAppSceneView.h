@@ -25,6 +25,7 @@
 @interface ExternalAppSceneView : UIView
 @property (nonatomic, weak) id<ExternalAppSceneView> delegate;
 - (instancetype)initExternalWindowWithScene:(FBScene *)scene withAppName:(NSString *)appName withSettings:(UIMutableApplicationSceneSettings *)settings;
+- (void)closeWindow:(id)sender;   // TRL 追加声明（ITS 内部方法，AppSceneHost 外部调用需要）
 @end
 
 @interface UIScreen(Private)
