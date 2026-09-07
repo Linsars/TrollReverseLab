@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-ipa:
     name: Build IPA on macOS
-    runs-on: macos-15  # macOS 15 with Xcode 16.x (supports project format 77)
+    runs-on: macos-14  # Xcode 15.4 / iOS 17.5 SDK —— SDK 仍含 PrivateFrameworks（Xcode 16+ 的 SDK 已删除，私有框架链接在 macos-15 上走不通）
 
     steps:
       - name: Checkout repository
