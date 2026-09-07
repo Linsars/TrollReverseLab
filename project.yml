@@ -3,7 +3,8 @@ options:
   bundleIdPrefix: com.trollreverse
   deploymentTarget:
     iOS: "14.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "15.3"
+  projectFormat: xcode15_3   # 输出 objectVersion 63 —— Xcode 15.4 (macos-14 runner) 可读；xcodegen 2.46 默认 xcode16_0 写的 preferredProjectObjectVersion 字段 15.4 读不了
   createIntermediateGroups: true
   groupSortPosition: top
   generateEmptyDirectories: true
